@@ -1,0 +1,12 @@
+# Ignore sensitive files
+config.php
+
+# Ignore IDE and system files
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Ignore XAMPP/htdocs specific
+.htaccess
