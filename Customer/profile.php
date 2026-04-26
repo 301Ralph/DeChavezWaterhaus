@@ -201,7 +201,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['delete_account'])) {
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="customer_dashboard.php" class="nav-link"><i class="fas fa-home"></i> <span>Dashboard</span></a></li>
                 <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box"></i> <span>Products</span></a></li>
+                <li class="nav-item">
+                    <a href="orders.php" class="nav-link">
+                        <i class="fas fa-shopping-cart"></i> <span>Place Order</span>
+                    </a>
+                </li>
                 <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history"></i> <span>Order History</span></a></li>
+                <li class="nav-item">
+                    <a href="order_tracking.php" class="nav-link">
+                        <i class="fas fa-map-marker-alt"></i> <span>Track Orders</span>
+                    </a>
+                </li>
                 <li class="nav-item"><a href="profile.php" class="nav-link active"><i class="fas fa-user"></i> <span>Profile</span></a></li>
                 <li class="nav-item mt-4"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt"></i> <span>Logout</span></a></li>
             </ul>

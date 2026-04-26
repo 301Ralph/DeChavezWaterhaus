@@ -164,8 +164,18 @@ $conn->close();
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="orders.php" class="nav-link">
+                        <i class="fas fa-shopping-cart"></i> <span>Place Order</span>
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="order_history.php" class="nav-link">
                         <i class="fas fa-history"></i> <span>Order History</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="order_tracking.php" class="nav-link">
+                        <i class="fas fa-map-marker-alt"></i> <span>Track Orders</span>
                     </a>
                 </li>
                 <li class="nav-item">
