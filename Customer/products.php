@@ -11,11 +11,24 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'customer') {
 $userID = $_SESSION['userID'];
 $userName = $_SESSION['userName'];
 
+// Check if email is verified
+$verifyCheck = $conn->prepare("SELECT email_verified FROM customers WHERE userID = ?");
+$verifyCheck->bind_param("i", $userID);
+$verifyCheck->execute();
+$verifyResult = $verifyCheck->get_result()->fetch_assoc();
+$verifyCheck->close();
+
+$isEmailVerified = $verifyResult['email_verified'] ?? 0;
+
 // Fetch products
 $productsResult = $conn->query("SELECT * FROM product WHERE Status = 'Active'");
 
 // Handle order submission
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['place_order'])) {
+    if (!$isEmailVerified) {
+        echo '<script>alert("Please verify your email address first before placing an order."); window.location = "profile.php";</script>';
+        exit();
+    }
     $productID = intval($_POST['productID']);
     $quantity = intval($_POST['quantity']);
     $deliveryDate = $_POST['delivery_date'];

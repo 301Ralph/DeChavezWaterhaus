@@ -62,7 +62,7 @@ if (isset($_GET['resend']) && $_GET['resend'] == 1) {
     $new_otp = rand(100000, 999999);
     $_SESSION['otp'] = $new_otp;
     $_SESSION['otp_expiry'] = time() + 300;
-
+    require_once 'config.php';
     // Send email via Brevo
     $apiKey = BREVO_API_KEY;
 

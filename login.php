@@ -37,9 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                     $_SESSION['role'] = $user['Role'];
 
                     if ($user['Role'] === 'admin') {
-                        header("Location: Admin/admin_dashboard.php");
+                        header("Location: ../Admin/admin_dashboard.php");
                     } elseif ($user['Role'] === 'rider') {
-                        header("Location: Rider/rider_dashboard.php");
+                        header("Location: ../Rider/rider_dashboard.php");
                     } else {
                         header("Location: Customer/customer_dashboard.php");
                     }
@@ -82,12 +82,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         } else {
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);
             $role = 'customer';
+            $verification_token = bin2hex(random_bytes(32));
 
-            $stmt = $conn->prepare("INSERT INTO customers (Firstname, Lastname, Email, Contact, Address, Password, Role, two_factor_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, 0)");
-            $stmt->bind_param("sssssss", $firstname, $lastname, $email, $phone, $address, $hashed_password, $role);
+            $stmt = $conn->prepare("INSERT INTO customers (Firstname, Lastname, Email, Contact, Address, Password, Role, two_factor_enabled, email_verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
+            $stmt->bind_param("ssssssss", $firstname, $lastname, $email, $phone, $address, $hashed_password, $role, $verification_token);
 
             if ($stmt->execute()) {
-                $success = "Registration successful! Please login.";
+                // Send verification email
+                $verificationLink = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . "/verify_email.php?token=" . $verification_token;
+                
+                require_once 'config.php';
+                $apiKey = BREVO_API_KEY; 
+                $data = [
+                    'sender' => ['name' => 'De Chavez Waterhaus', 'email' => 'cocacc202501@gmail.com'],
+                    'to' => [['email' => $email]],
+                    'subject' => 'Verify Your Email Address',
+                    'htmlContent' => "
+                        <h2>Welcome to De Chavez Waterhaus!</h2>
+                        <p>Hi $firstname,</p>
+                        <p>Please verify your email address by clicking the button below:</p>
+                        <p style='margin: 20px 0;'>
+                            <a href='$verificationLink' style='background: #0077B6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;'>Verify Email</a>
+                        </p>
+                        <p>This link will expire in 24 hours.</p>
+                    "
+                ];
+
+                $ch = curl_init('https://api.brevo.com/v3/smtp/email');
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'accept: application/json',
+                    'api-key: ' . $apiKey,
+                    'content-type: application/json'
+                ]);
+                curl_exec($ch);
+                curl_close($ch);
+
+                $success = "Registration successful! Please check your email to verify your account.";
             } else {
                 $error = "Registration failed. Please try again.";
             }
@@ -98,9 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 }
 
 function sendOTPEmail($email, $otp) {
-    $apiKey = BREVO_API_KEY;
+    $apiKey = 'YOUR_BREVO_API_KEY_HERE';
     $data = [
-        'sender' => ['name' => 'De Chavez Waterhaus', 'email' => 'cocacc202501@gmail.com'],
+        'sender' => ['name' => 'De Chavez Waterhaus', 'email' => 'yourgmail@gmail.com'],
         'to' => [['email' => $email]],
         'subject' => 'Your Login OTP Code',
         'htmlContent' => "<h2>Your OTP Code: <strong>$otp</strong></h2><p>Expires in 5 minutes.</p>"
@@ -145,7 +178,7 @@ function sendOTPEmail($email, $otp) {
         <!-- Left Panel - Website Info -->
         <div class="left-panel d-none d-lg-flex">
             <div class="left-content">
-                <img src="images/logo.png" alt="Logo" style="width: 90px; height: 90px; border-radius: 50%; margin-bottom: 30px;">
+                <img src="../images/logo.png" alt="Logo" style="width: 90px; height: 90px; border-radius: 50%; margin-bottom: 30px;">
                 <h1 class="fw-bold mb-4" style="font-size: 2.8rem;">De Chavez Waterhaus</h1>
                 <p class="lead mb-4">Pure, fresh water delivered straight to your door.</p>
                 <div class="d-flex justify-content-center gap-4 mt-5">
@@ -160,7 +193,7 @@ function sendOTPEmail($email, $otp) {
         <div class="right-panel">
             <div class="auth-card">
                 <div class="text-center mb-4">
-                    <img src="images/logo.png" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%;">
+                    <img src="../images/logo.png" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%;">
                     <h4 class="fw-bold mt-3">Welcome Back</h4>
                     <p class="text-muted small">Sign in to continue</p>
                 </div>

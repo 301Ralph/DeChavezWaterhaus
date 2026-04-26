@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_otp'])) {
             $_SESSION['reset_expiry'] = time() + 300;
             $_SESSION['reset_userID'] = $user['userID'];
             $_SESSION['reset_step'] = 2;
-
+            require_once 'config.php';
             $apiKey = BREVO_API_KEY;
             $data = [
                 'sender' => ['name' => 'De Chavez Waterhaus', 'email' => 'cocacc202501@gmail.com'],

@@ -11,21 +11,22 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'customer') {
 $userID = $_SESSION['userID'];
 $userName = $_SESSION['userName'];
 
-// Safely check if user is verified (handles missing column)
-$isVerified = 0;
-$checkVerified = $conn->query("SELECT isVerified FROM customers WHERE userID = $userID");
-if ($checkVerified && $checkVerified->num_rows > 0) {
-    $row = $checkVerified->fetch_assoc();
-    $isVerified = $row['isVerified'] ?? 0;
-}
+// Check if email is verified
+$verifyCheck = $conn->prepare("SELECT email_verified FROM customers WHERE userID = ?");
+$verifyCheck->bind_param("i", $userID);
+$verifyCheck->execute();
+$verifyResult = $verifyCheck->get_result()->fetch_assoc();
+$verifyCheck->close();
+
+$isEmailVerified = $verifyResult['email_verified'] ?? 0;
 
 // Fetch products
 $productsResult = $conn->query("SELECT * FROM product WHERE Status = 'Active'");
 
 // Handle order submission
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['place_order'])) {
-    if (!$isVerified) {
-        echo '<script>alert("Please verify your account first before placing an order."); window.location = "profile.php";</script>';
+    if (!$isEmailVerified) {
+        echo '<script>alert("Please verify your email address first before placing an order."); window.location = "profile.php";</script>';
         exit();
     }
 
@@ -183,7 +184,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['place_order'])) {
         <!-- Products Grid -->
         <h5 class="section-title">Available Products</h5>
         
-        <?php if (!$isVerified): ?>
+        <?php if (!$isEmailVerified): ?>
             <div class="alert alert-warning d-flex align-items-center mb-4">
                 <i class="fas fa-exclamation-triangle me-3 fa-lg"></i>
                 <div>
@@ -215,11 +216,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['place_order'])) {
                                     data-productid="<?php echo $product['ProductID']; ?>"
                                     data-productname="<?php echo $product['ProductName']; ?>"
                                     data-price="<?php echo $product['Price']; ?>"
-                                    <?php echo !$isVerified ? 'disabled' : ''; ?>>
+                                    <?php echo !$isEmailVerified ? 'disabled' : ''; ?>>
                                 <i class="fas fa-shopping-cart me-2"></i> Order Now
                             </button>
                             
-                            <?php if (!$isVerified): ?>
+                            <?php if (!$isEmailVerified): ?>
                                 <small class="text-muted d-block text-center mt-2">Verification required</small>
                             <?php endif; ?>
                         </div>
