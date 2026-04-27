@@ -98,6 +98,7 @@ if (isset($_GET['resend']) && $_GET['resend'] == 1) {
     <title>Verify OTP • De Chavez Waterhaus</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="icon" href="images/logo.jpg" type="image/x-icon">
     <style>
         body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #0077B6, #023E8A); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
         .otp-card { background: white; border-radius: 24px; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4); max-width: 420px; width: 100%; padding: 2.5rem; }

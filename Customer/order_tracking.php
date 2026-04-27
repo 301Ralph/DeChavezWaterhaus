@@ -40,6 +40,7 @@ $stmt->close();
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
         :root { --primary: #0077B6; --primary-dark: #023E8A; }
         body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
@@ -82,7 +83,7 @@ $stmt->close();
     <!-- Sidebar -->
     <div class="sidebar">
         <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
-            <img src="../images/logo.png" alt="Logo" style="width: 45px; height: 45px; border-radius: 50%;">
+            <img src="../images/logo.jpg" alt="Logo" style="width: 45px; height: 45px; border-radius: 50%;">
             <span class="fw-bold fs-5">De Chavez Waterhaus</span>
         </div>
         
@@ -97,6 +98,7 @@ $stmt->close();
                 </li>
                 <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history "></i><span>Order History</span></a></li>
                 <li class="nav-item"><a href="order_tracking.php" class="nav-link active"><i class="fas fa-map-marker-alt "></i><span>Track Orders</span></a></li>
+                <li class="nav-item"><a href="notifications.php" class="nav-link"><i class="fas fa-bell "></i> Notifications</a></li>
                 <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user "></i><span>Profile</span></a></li>
                 <li class="nav-item mt-4"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt "></i><span>Logout</span></a></li>
             </ul>

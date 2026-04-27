@@ -17,17 +17,23 @@ $productsResult = $conn->query($productsQuery);
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
     <link rel="stylesheet" href="designs/index-style.css">
+    <link rel="icon" href="images/logo.jpg" type="image/x-icon">
 </head>
 <body>
     <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top shadow-sm">
         <div class="container">
-            <a class="navbar-brand fw-bold fs-3" href="#">
-                <i class="fas fa-tint me-2 text-info"></i>De Chavez Waterhaus
+            <a class="navbar-brand d-flex align-items-center" href="#">
+                <img src="images/logo.jpg" 
+                    alt="De Chavez Waterhaus Logo" 
+                    style="width: 55px; height: 55px; border-radius: 50%; object-fit: cover; margin-right: 12px; border: 2px solid #fff;">
+                <span class="fw-bold fs-4 text-white">De Chavez Waterhaus</span>
             </a>
+            
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
+            
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto align-items-lg-center">
                     <li class="nav-item"><a class="nav-link" href="#home">Home</a></li>
@@ -35,12 +41,14 @@ $productsResult = $conn->query($productsQuery);
                     <li class="nav-item"><a class="nav-link" href="#why-us">Why Us</a></li>
                     <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
                     <li class="nav-item"><a class="nav-link" href="#faq">FAQ</a></li>
+                    
                     <li class="nav-item ms-lg-3">
                         <button class="btn btn-outline-light btn-sm position-relative" onclick="showCartModal()">
                             <i class="fas fa-shopping-cart fa-lg"></i>
                             <span id="cart-count" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-info">0</span>
                         </button>
                     </li>
+                    
                     <li class="nav-item ms-lg-2">
                         <a class="btn btn-primary btn-sm px-3" href="login.php">
                             <i class="fas fa-user me-1"></i> Sign In

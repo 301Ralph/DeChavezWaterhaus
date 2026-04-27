@@ -27,6 +27,12 @@ $ordersQuery = "
     ORDER BY o.order_date $order";
 
 $ordersResult = $conn->query($ordersQuery);
+
+$stmt = $conn->prepare("SELECT * FROM customers WHERE userID = ?");
+$stmt->bind_param("i", $userID);
+$stmt->execute();
+$user = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 ?>
 
 <!DOCTYPE html>
@@ -38,6 +44,7 @@ $ordersResult = $conn->query($ordersQuery);
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
         :root { --primary: #0077B6; --primary-dark: #023E8A; }
         body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
@@ -66,7 +73,7 @@ $ordersResult = $conn->query($ordersQuery);
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
         <div class="logo">
-            <img src="../images/logo.png" alt="Logo">
+            <img src="../images/logo.jpg" alt="Logo">
             <span class="fw-bold fs-5">De Chavez Waterhaus</span>
         </div>
         
@@ -85,6 +92,7 @@ $ordersResult = $conn->query($ordersQuery);
                         <i class="fas fa-map-marker-alt"></i> <span>Track Orders</span>
                     </a>
                 </li>
+                <li class="nav-item"><a href="notifications.php" class="nav-link "><i class="fas fa-bell "></i> Notifications</a></li>
                 <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user"></i> <span>Profile</span></a></li>
                 <li class="nav-item mt-4"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt"></i> <span>Logout</span></a></li>
             </ul>
@@ -108,8 +116,12 @@ $ordersResult = $conn->query($ordersQuery);
                 
                 <div class="dropdown">
                     <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                            <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
+                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center overflow-hidden" style="width: 38px; height: 38px;">
+                            <?php if (!empty($user['profile_picture']) && file_exists("../" . $user['profile_picture'])): ?>
+                                <img src="../<?php echo $user['profile_picture']; ?>" style="width: 38px; height: 38px; object-fit: cover;">
+                            <?php else: ?>
+                                <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
+                            <?php endif; ?>
                         </div>
                         <div class="text-start d-none d-md-block">
                             <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>

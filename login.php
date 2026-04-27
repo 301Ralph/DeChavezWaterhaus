@@ -157,6 +157,7 @@ function sendOTPEmail($email, $otp) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link rel="icon" href="images/logo.jpg" type="image/x-icon">
     <style>
         :root { --primary: #0077B6; --primary-dark: #023E8A; }
         body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #0077B6, #023E8A); min-height: 100vh; }
@@ -178,7 +179,7 @@ function sendOTPEmail($email, $otp) {
         <!-- Left Panel - Website Info -->
         <div class="left-panel d-none d-lg-flex">
             <div class="left-content">
-                <img src="../images/logo.png" alt="Logo" style="width: 90px; height: 90px; border-radius: 50%; margin-bottom: 30px;">
+                <img src="images/logo.jpg" alt="Logo" style="width: 90px; height: 90px; border-radius: 50%; margin-bottom: 30px;">
                 <h1 class="fw-bold mb-4" style="font-size: 2.8rem;">De Chavez Waterhaus</h1>
                 <p class="lead mb-4">Pure, fresh water delivered straight to your door.</p>
                 <div class="d-flex justify-content-center gap-4 mt-5">
@@ -193,7 +194,7 @@ function sendOTPEmail($email, $otp) {
         <div class="right-panel">
             <div class="auth-card">
                 <div class="text-center mb-4">
-                    <img src="../images/logo.png" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%;">
+                    <img src="images/logo.jpg" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%;">
                     <h4 class="fw-bold mt-3">Welcome Back</h4>
                     <p class="text-muted small">Sign in to continue</p>
                 </div>
