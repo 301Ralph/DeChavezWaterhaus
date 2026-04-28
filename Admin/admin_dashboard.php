@@ -11,13 +11,31 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'admin') {
 $adminID = $_SESSION['userID'];
 $adminName = $_SESSION['userName'] ?? 'Admin';
 
+// Fetch admin data for profile picture
+$admin = $conn->query("SELECT * FROM customers WHERE userID = " . $_SESSION['userID'])->fetch_assoc();
+
 // Fetch dashboard statistics
 $totalOrders = $conn->query("SELECT COUNT(*) as count FROM orders")->fetch_assoc()['count'] ?? 0;
 $totalRevenue = $conn->query("SELECT SUM(total_amount) as total FROM orders WHERE status = 'Delivered'")->fetch_assoc()['total'] ?? 0;
-$totalCustomers = $conn->query("SELECT COUNT(*) as count FROM customers")->fetch_assoc()['count'] ?? 0;
+$totalCustomers = $conn->query("SELECT COUNT(*) as count FROM customers WHERE Role = 'customer'")->fetch_assoc()['count'] ?? 0;
 $pendingOrders = $conn->query("SELECT COUNT(*) as count FROM orders WHERE status IN ('Pending', 'Processing')")->fetch_assoc()['count'] ?? 0;
-$activeRiders = $conn->query("SELECT COUNT(*) as count FROM riders WHERE status = 'Active'")->fetch_assoc()['count'] ?? 0;
-$openTickets = $conn->query("SELECT COUNT(*) as count FROM support_tickets WHERE status IN ('Open', 'In Progress')")->fetch_assoc()['count'] ?? 0;
+$activeRiders = 0;
+try {
+    $activeEmployees = 0;
+try {
+    $activeEmployees = $conn->query("SELECT COUNT(*) as count FROM customers WHERE Role = 'employee' AND status = 'Active'")->fetch_assoc()['count'] ?? 0;
+} catch (Exception $e) {
+    // Table might not exist yet
+}
+} catch (Exception $e) {
+    // Riders table doesn't exist yet - will be 0
+}
+$openTickets = 0;
+try {
+    $openTickets = $conn->query("SELECT COUNT(*) as count FROM support_tickets WHERE status IN ('Open', 'In Progress')")->fetch_assoc()['count'] ?? 0;
+} catch (Exception $e) {
+    // support_tickets table doesn't exist yet - will be 0
+}
 
 // Recent orders
 $recentOrders = $conn->query("
@@ -33,7 +51,7 @@ $recentOrders = $conn->query("
 $pendingVerifications = $conn->query("
     SELECT userID, Firstname, Lastname, Email, created_at
     FROM customers 
-    WHERE verification_status = 'pending'
+    WHERE verification_status = 'pending' AND Role = 'customer'
     ORDER BY created_at DESC
     LIMIT 5
 ");
@@ -57,6 +75,18 @@ $pendingVerifications = $conn->query("
             position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
             background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
             transition: all 0.3s ease; 
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar .nav-menu {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: 20px;
+        }
+        .sidebar .logout-section {
+            padding: 15px 10px;
+            border-top: 1px solid #eee;
+            background: white;
         }
         .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
         .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
@@ -116,17 +146,22 @@ $pendingVerifications = $conn->query("
             </div>
         </div>
         
-        <div class="px-3 mt-2" style="height: calc(100vh - 90px); overflow-y: auto; padding-bottom: 20px;">
+        <div class="nav-menu px-3 mt-2">
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="admin_dashboard.php" class="nav-link active"><i class="fas fa-tachometer-alt me-3"></i> <span>Dashboard</span></a></li>
                 <li class="nav-item"><a href="manage_products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Manage Products</span></a></li>
                 <li class="nav-item"><a href="manage_orders.php" class="nav-link"><i class="fas fa-shopping-cart me-3"></i> <span>Manage Orders</span></a></li>
                 <li class="nav-item"><a href="manage_users.php" class="nav-link"><i class="fas fa-users me-3"></i> <span>Manage Users</span></a></li>
-                <li class="nav-item"><a href="manage_riders.php" class="nav-link"><i class="fas fa-motorcycle me-3"></i> <span>Manage Riders</span></a></li>
+                <li class="nav-item"><a href="manage_employees.php" class="nav-link"><i class="fas fa-users me-3"></i> <span>Manage Employees</span></a></li>
                 <li class="nav-item"><a href="support_tickets.php" class="nav-link"><i class="fas fa-headset me-3"></i> <span>Support Tickets</span></a></li>
                 <li class="nav-item"><a href="reports.php" class="nav-link"><i class="fas fa-chart-bar me-3"></i> <span>Reports & Analytics</span></a></li>
-                
-                <li class="nav-item mt-4"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
+                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>My Profile</span></a></li>
+            </ul>
+        </div>
+        
+        <div class="logout-section">
+            <ul class="nav flex-column">
+                <li class="nav-item"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
             </ul>
         </div>
     </div>
@@ -147,9 +182,13 @@ $pendingVerifications = $conn->query("
             
             <div class="dropdown">
                 <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                    <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                        <span class="fw-bold fs-6"><?php echo strtoupper(substr($adminName, 0, 1)); ?></span>
-                    </div>
+                    <?php if (!empty($admin['profile_picture']) && file_exists('../' . $admin['profile_picture'])): ?>
+                        <img src="../<?php echo $admin['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
+                    <?php else: ?>
+                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
+                            <span class="fw-bold fs-6"><?php echo strtoupper(substr($adminName, 0, 1)); ?></span>
+                        </div>
+                    <?php endif; ?>
                     <div class="text-start d-none d-md-block">
                         <div class="fw-semibold"><?php echo htmlspecialchars($adminName); ?></div>
                         <small class="text-muted">Administrator</small>
@@ -310,8 +349,8 @@ $pendingVerifications = $conn->query("
                     </div>
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <div><i class="fas fa-motorcycle text-primary me-2"></i> Active Riders</div>
-                            <span class="fw-bold"><?php echo $activeRiders; ?></span>
+                            <div><i class="fas fa-users text-primary me-2"></i> Active Employees</div>
+                            <span class="fw-bold"><?php echo $activeEmployees; ?></span>
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <div><i class="fas fa-ticket-alt text-warning me-2"></i> Open Tickets</div>
