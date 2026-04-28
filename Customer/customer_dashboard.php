@@ -11,54 +11,45 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'customer') {
 $userID = $_SESSION['userID'];
 $userName = $_SESSION['userName'];
 
-// ==================== CHANGE THIS IF YOU GET COLUMN ERROR ====================
-$customerColumn = 'userID';   // ← Change this if needed (userID, customer_id, etc.)
+$customerColumn = 'userID';
 
-// ==================== FETCH DASHBOARD DATA ====================
-
-// 1. Total Orders
+// Fetch dashboard data
 $stmt = $conn->prepare("SELECT COUNT(*) as total_orders FROM orders WHERE $customerColumn = ?");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 $totalOrders = $stmt->get_result()->fetch_assoc()['total_orders'] ?? 0;
 $stmt->close();
 
-// 2. Active Orders
 $stmt = $conn->prepare("SELECT COUNT(*) as active_orders FROM orders WHERE $customerColumn = ? AND status IN ('Pending', 'Processing', 'Out for Delivery')");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 $activeOrders = $stmt->get_result()->fetch_assoc()['active_orders'] ?? 0;
 $stmt->close();
 
-// 3. Total Spent
 $stmt = $conn->prepare("SELECT SUM(total_amount) as total_spent FROM orders WHERE $customerColumn = ? AND status = 'Delivered'");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 $totalSpent = $stmt->get_result()->fetch_assoc()['total_spent'] ?? 0;
 $stmt->close();
 
-// 4. Pending Orders (replaced Hydration Score)
 $stmt = $conn->prepare("SELECT COUNT(*) as pending_orders FROM orders WHERE $customerColumn = ? AND status = 'Pending'");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 $pendingOrders = $stmt->get_result()->fetch_assoc()['pending_orders'] ?? 0;
 $stmt->close();
 
-// 5. Recent Orders (Last 5)
 $stmt = $conn->prepare("SELECT orderID, order_date, total_amount, status FROM orders WHERE $customerColumn = ? ORDER BY order_date DESC LIMIT 5");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 $recentOrders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// 6. Current Active Order
 $stmt = $conn->prepare("SELECT orderID, order_date, total_amount, status FROM orders WHERE $customerColumn = ? AND status IN ('Pending', 'Processing', 'Out for Delivery') ORDER BY order_date DESC LIMIT 1");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 $currentOrder = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// Notification count (must be before closing connection)
 $notifCount = $conn->query("SELECT COUNT(*) as unread FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['unread'] ?? 0;
 
 $stmt = $conn->prepare("SELECT * FROM customers WHERE userID = ?");
@@ -149,66 +140,87 @@ $stmt->close();
             background: white; border-radius: 20px; 
             box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #f0f0f0;
         }
+
+        .sidebar .nav-link {
+            padding: 12px 18px;
+            margin: 2px 8px;
+            border-radius: 10px;
+        }
+        .sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 3px;
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 991.98px) {
+            .main-content { margin-left: 0; padding: 20px; }
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.show { transform: translateX(0); }
+            
+            .welcome-header { padding: 25px 20px; }
+            .welcome-header h2 { font-size: 1.5rem; }
+            
+            .stat-card { padding: 20px; }
+            .stat-icon { width: 48px; height: 48px; font-size: 1.4rem; }
+            
+            .quick-action-btn { padding: 18px; }
+            .quick-action-btn i { font-size: 1.8rem; margin-right: 12px; }
+        }
+        
+        @media (max-width: 576px) {
+            .main-content { padding: 15px; }
+            .welcome-header { padding: 20px 15px; }
+            .welcome-header h2 { font-size: 1.3rem; }
+            
+            .stat-card { padding: 18px; }
+            .section-title { font-size: 1.1rem; }
+        }
     </style>
 </head>
 <body>
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
-        <div class="logo">
-            <img src="../images/logo.jpg" alt="Logo">
+        <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
+            <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
             <span class="fw-bold fs-5">De Chavez Waterhaus</span>
         </div>
         
-        <div class="px-3 mt-2">
+        <div class="px-3 mt-2" style="height: calc(100vh - 90px); overflow-y: auto; padding-bottom: 20px;">
             <ul class="nav flex-column">
-                <li class="nav-item">
-                    <a href="customer_dashboard.php" class="nav-link active">
-                        <i class="fas fa-home"></i> <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="products.php" class="nav-link">
-                        <i class="fas fa-box"></i> <span>Products</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="orders.php" class="nav-link">
-                        <i class="fas fa-shopping-cart"></i> <span>Place Order</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="order_history.php" class="nav-link">
-                        <i class="fas fa-history"></i> <span>Order History</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="order_tracking.php" class="nav-link">
-                        <i class="fas fa-map-marker-alt"></i> <span>Track Orders</span>
-                    </a>
-                </li>
-                <li class="nav-item"><a href="notifications.php" class="nav-link"><i class="fas fa-bell "></i> Notifications</a></li>
-                <li class="nav-item">
-                    <a href="profile.php" class="nav-link">
-                        <i class="fas fa-user"></i> <span>Profile</span>
-                    </a>
-                </li>
-                <li class="nav-item mt-4">
-                    <a href="../logout.php" class="nav-link text-danger">
-                        <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
-                    </a>
-                </li>
+                <li class="nav-item"><a href="customer_dashboard.php" class="nav-link active"><i class="fas fa-home me-3"></i> <span>Dashboard</span></a></li>
+                <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Products</span></a></li>
+                <li class="nav-item"><a href="orders.php" class="nav-link"><i class="fas fa-shopping-cart me-3"></i> <span>Place Order</span></a></li>
+                <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history me-3"></i> <span>Order History</span></a></li>
+                <li class="nav-item"><a href="order_tracking.php" class="nav-link"><i class="fas fa-map-marker-alt me-3"></i> <span>Track Orders</span></a></li>
+                <li class="nav-item"><a href="recurring_orders.php" class="nav-link"><i class="fas fa-redo me-3"></i> <span>Recurring Orders</span></a></li>
+                <li class="nav-item"><a href="support_tickets.php" class="nav-link"><i class="fas fa-headset me-3"></i> <span>Support Tickets</span></a></li>
+                <li class="nav-item"><a href="notifications.php" class="nav-link"><i class="fas fa-bell me-3"></i> <span>Notifications</span></a></li>
+                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>Profile</span></a></li>
+                
+                <li class="nav-item mt-4"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
             </ul>
         </div>
     </div>
 
     <!-- Main Content -->
     <div class="main-content">
-        
+
         <!-- Top Navbar -->
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h4 class="fw-bold mb-0">Good morning, <?php echo htmlspecialchars($userName); ?>!</h4>
-                <p class="text-muted mb-0">Here's your water delivery overview</p>
+            <div class="d-flex align-items-center">
+                <!-- Hamburger Button (Mobile Only) -->
+                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
+                    <i class="fas fa-bars"></i>
+                </button>
+                
+                <div>
+                    <h4 class="fw-bold mb-0 d-none d-sm-block">Good morning, <?php echo htmlspecialchars($userName); ?>!</h4>
+                    <h4 class="fw-bold mb-0 d-sm-none">Hi, <?php echo htmlspecialchars(explode(' ', $userName)[0]); ?>!</h4>
+                    <p class="text-muted mb-0 d-none d-sm-block">Here's your water delivery overview</p>
+                </div>
             </div>
             
             <div class="d-flex align-items-center gap-3">
@@ -269,7 +281,7 @@ $stmt->close();
 
         <!-- Stats Cards -->
         <div class="row g-4 mb-4">
-            <div class="col-md-3">
+            <div class="col-md-3 col-sm-6">
                 <div class="stat-card">
                     <div class="stat-icon bg-primary bg-opacity-10 text-primary">
                         <i class="fas fa-shopping-bag"></i>
@@ -278,7 +290,7 @@ $stmt->close();
                     <p class="text-muted mb-0 fw-medium">Total Orders</p>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 col-sm-6">
                 <div class="stat-card">
                     <div class="stat-icon bg-warning bg-opacity-10 text-warning">
                         <i class="fas fa-truck"></i>
@@ -287,7 +299,7 @@ $stmt->close();
                     <p class="text-muted mb-0 fw-medium">Active Orders</p>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 col-sm-6">
                 <div class="stat-card">
                     <div class="stat-icon bg-success bg-opacity-10 text-success">
                         <i class="fas fa-peso-sign"></i>
@@ -296,7 +308,7 @@ $stmt->close();
                     <p class="text-muted mb-0 fw-medium">Total Spent</p>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 col-sm-6">
                 <div class="stat-card">
                     <div class="stat-icon bg-info bg-opacity-10 text-info">
                         <i class="fas fa-clock"></i>
@@ -456,20 +468,36 @@ $stmt->close();
     <script>
         // Sidebar toggle for mobile
         const sidebar = document.getElementById('sidebar');
-        const toggleBtn = document.createElement('button');
-        toggleBtn.className = 'btn btn-light position-fixed d-lg-none shadow-sm';
-        toggleBtn.style.cssText = 'top: 22px; left: 22px; z-index: 1100; border-radius: 12px;';
-        toggleBtn.innerHTML = '<i class="fas fa-bars"></i>';
-        document.body.appendChild(toggleBtn);
+        const mobileToggle = document.getElementById('mobileToggle');
         
-        toggleBtn.addEventListener('click', () => {
-            sidebar.classList.toggle('collapsed');
+        if (mobileToggle) {
+            mobileToggle.addEventListener('click', () => {
+                sidebar.classList.toggle('show');
+            });
+            
+            // Close sidebar when clicking outside
+            document.addEventListener('click', function(e) {
+                if (window.innerWidth < 992 && 
+                    !sidebar.contains(e.target) && 
+                    !mobileToggle.contains(e.target)) {
+                    sidebar.classList.remove('show');
+                }
+            });
+        }
+        
+        // Close sidebar when clicking outside on mobile
+        document.addEventListener('click', function(e) {
+            if (window.innerWidth < 992 && !sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+                sidebar.classList.remove('show');
+            }
         });
         
         // Auto collapse on mobile
         if (window.innerWidth < 992) {
-            sidebar.classList.add('collapsed');
+            sidebar.classList.remove('show');
         }
+
+        
     </script>
 </body>
 </html>

@@ -37,9 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                     $_SESSION['role'] = $user['Role'];
 
                     if ($user['Role'] === 'admin') {
-                        header("Location: ../Admin/admin_dashboard.php");
+                        header("Location: Admin/admin_dashboard.php");
                     } elseif ($user['Role'] === 'rider') {
-                        header("Location: ../Rider/rider_dashboard.php");
+                        header("Location: Rider/rider_dashboard.php");
                     } else {
                         header("Location: Customer/customer_dashboard.php");
                     }

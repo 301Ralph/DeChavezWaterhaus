@@ -1,6 +1,21 @@
 <?php
 session_start();
 
+// Determine where to redirect back based on user role
+$backLink = "index.php"; // Default fallback
+
+if (isset($_SESSION['userID']) && isset($_SESSION['role'])) {
+    $role = $_SESSION['role'];
+    
+    if ($role === 'customer') {
+        $backLink = "Customer/customer_dashboard.php";
+    } elseif ($role === 'admin') {
+        $backLink = "Admin/admin_dashboard.php";
+    } elseif ($role === 'rider') {
+        $backLink = "Rider/rider_dashboard.php";
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Clear the session array
     $_SESSION = array();
@@ -120,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </button>
         </form>
         
-        <a href="index.php" class="btn-back">
+        <a href="<?php echo $backLink; ?>" class="btn-back">
             <i class="fas fa-arrow-left me-1"></i> No, Go Back to Home
         </a>
         
