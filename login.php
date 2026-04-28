@@ -38,8 +38,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
                     if ($user['Role'] === 'admin') {
                         header("Location: Admin/admin_dashboard.php");
-                    } elseif ($user['Role'] === 'rider') {
-                        header("Location: Rider/rider_dashboard.php");
+                    } elseif ($user['Role'] === 'employee') {
+                        header("Location: Employee/employee_dashboard.php");
                     } else {
                         header("Location: Customer/customer_dashboard.php");
                     }
