@@ -191,8 +191,7 @@ $stmt->close();
         <div class="px-3 mt-2" style="height: calc(100vh - 90px); overflow-y: auto; padding-bottom: 20px;">
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="customer_dashboard.php" class="nav-link active"><i class="fas fa-home me-3"></i> <span>Dashboard</span></a></li>
-                <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Products</span></a></li>
-                <li class="nav-item"><a href="orders.php" class="nav-link"><i class="fas fa-shopping-cart me-3"></i> <span>Place Order</span></a></li>
+                <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Products</span></a></li
                 <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history me-3"></i> <span>Order History</span></a></li>
                 <li class="nav-item"><a href="order_tracking.php" class="nav-link"><i class="fas fa-map-marker-alt me-3"></i> <span>Track Orders</span></a></li>
                 <li class="nav-item"><a href="recurring_orders.php" class="nav-link"><i class="fas fa-redo me-3"></i> <span>Recurring Orders</span></a></li>
@@ -390,70 +389,6 @@ $stmt->close();
                                 <i class="fas fa-truck-loading fa-3x text-muted mb-3 opacity-75"></i>
                                 <p class="text-muted mb-3">You currently have no active orders.</p>
                                 <a href="orders.php" class="btn btn-primary px-4 rounded-pill">Place Your First Order</a>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Recent Orders -->
-            <div class="col-12">
-                <div class="dashboard-card">
-                    <div class="card-body p-4">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h5 class="section-title mb-0">Recent Orders</h5>
-                            <a href="order_history.php" class="text-primary fw-semibold text-decoration-none">
-                                View All <i class="fas fa-arrow-right ms-1"></i>
-                            </a>
-                        </div>
-                        
-                        <?php if (!empty($recentOrders)): ?>
-                            <div class="table-responsive">
-                                <table class="table align-middle mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th class="ps-0">Order ID</th>
-                                            <th>Date</th>
-                                            <th>Amount</th>
-                                            <th>Status</th>
-                                            <th class="text-end pe-0">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($recentOrders as $order): ?>
-                                            <tr>
-                                                <td class="ps-0"><strong class="text-dark">#<?php echo $order['orderID']; ?></strong></td>
-                                                <td><?php echo date('M d, Y', strtotime($order['order_date'])); ?></td>
-                                                <td><span class="fw-bold">₱<?php echo number_format($order['total_amount'], 2); ?></span></td>
-                                                <td>
-                                                    <?php
-                                                    $statusClass = match($order['status']) {
-                                                        'Delivered' => 'bg-success',
-                                                        'Out for Delivery' => 'bg-warning text-dark',
-                                                        'Processing' => 'bg-info text-dark',
-                                                        'Pending' => 'bg-secondary',
-                                                        default => 'bg-secondary'
-                                                    };
-                                                    ?>
-                                                    <span class="status-badge <?php echo $statusClass; ?>">
-                                                        <?php echo $order['status']; ?>
-                                                    </span>
-                                                </td>
-                                                <td class="text-end pe-0">
-                                                    <a href="order_details.php?order_id=<?php echo $order['orderID']; ?>" 
-                                                       class="btn btn-sm btn-outline-primary px-3 rounded-pill">
-                                                        View
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php else: ?>
-                            <div class="text-center py-5">
-                                <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
-                                <p class="text-muted">No orders yet. Start ordering today!</p>
                             </div>
                         <?php endif; ?>
                     </div>

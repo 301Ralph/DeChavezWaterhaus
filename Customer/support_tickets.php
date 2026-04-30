@@ -37,8 +37,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_ticket'])) {
     $insertStmt->close();
 }
 
-// Fetch user's tickets
+// Fetch user's tickets with statistics
 $tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID ORDER BY created_at DESC");
+
+// Get ticket statistics
+$statsQuery = $conn->query("
+    SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) as open,
+        SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'Resolved' THEN 1 ELSE 0 END) as resolved,
+        SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
+    FROM support_tickets 
+    WHERE userID = $userID
+");
+$stats = $statsQuery->fetch_assoc();
 ?>
 
 <!DOCTYPE html>
@@ -177,41 +190,101 @@ $tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID OR
             </div>
         </div>
 
+        <!-- Statistics Cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="stat-card">
+                    <div class="stat-number"><?php echo $stats['total']; ?></div>
+                    <div class="stat-label">Total Tickets</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="stat-card">
+                    <div class="stat-number text-success"><?php echo $stats['open']; ?></div>
+                    <div class="stat-label">Open</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="stat-card">
+                    <div class="stat-number text-warning"><?php echo $stats['in_progress']; ?></div>
+                    <div class="stat-label">In Progress</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="stat-card">
+                    <div class="stat-number text-primary"><?php echo $stats['resolved'] + $stats['closed']; ?></div>
+                    <div class="stat-label">Resolved</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Tickets List -->
         <div class="ticket-card p-4">
-            <h5 class="fw-bold mb-4">Your Tickets</h5>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="fw-bold mb-0">Your Tickets</h5>
+                <?php if ($tickets->num_rows > 0): ?>
+                    <span class="badge bg-primary"><?php echo $tickets->num_rows; ?> Total</span>
+                <?php endif; ?>
+            </div>
             
             <?php if ($tickets->num_rows > 0): ?>
                 <div class="table-responsive">
                     <table class="table align-middle">
-                        <thead>
+                        <thead class="table-light">
                             <tr>
                                 <th>Ticket ID</th>
                                 <th>Subject</th>
                                 <th>Category</th>
+                                <th>Priority</th>
                                 <th>Status</th>
                                 <th>Date</th>
                                 <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php while ($ticket = $tickets->fetch_assoc()) { ?>
+                            <?php 
+                            // Reset the result pointer
+                            $tickets->data_seek(0);
+                            while ($ticket = $tickets->fetch_assoc()) { 
+                                $priorityClass = 'priority-medium';
+                                if ($ticket['priority'] == 'Low') $priorityClass = 'priority-low';
+                                if ($ticket['priority'] == 'High') $priorityClass = 'priority-high';
+                                
+                                $statusClass = 'status-open';
+                                if ($ticket['status'] == 'In Progress') $statusClass = 'status-in-progress';
+                                if ($ticket['status'] == 'Resolved') $statusClass = 'status-resolved';
+                                if ($ticket['status'] == 'Closed') $statusClass = 'status-closed';
+                            ?>
                                 <tr>
                                     <td><strong>#<?php echo $ticket['ticketID']; ?></strong></td>
-                                    <td><?php echo htmlspecialchars($ticket['subject']); ?></td>
-                                    <td><span class="badge bg-secondary"><?php echo $ticket['category']; ?></span></td>
                                     <td>
-                                        <span class="badge status-<?php echo strtolower(str_replace(' ', '-', $ticket['status'])); ?>">
+                                        <div class="fw-semibold"><?php echo htmlspecialchars($ticket['subject']); ?></div>
+                                        <small class="text-muted"><?php echo substr(htmlspecialchars($ticket['message']), 0, 50) . '...'; ?></small>
+                                    </td>
+                                    <td><span class="badge bg-secondary"><?php echo $ticket['category']; ?></span></td>
+                                    <td><span class="badge <?php echo $priorityClass; ?>"><?php echo $ticket['priority']; ?></span></td>
+                                    <td>
+                                        <span class="badge <?php echo $statusClass; ?>">
                                             <?php echo $ticket['status']; ?>
                                         </span>
                                     </td>
-                                    <td><?php echo date('M j, Y', strtotime($ticket['created_at'])); ?></td>
+                                    <td>
+                                        <div><?php echo date('M j, Y', strtotime($ticket['created_at'])); ?></div>
+                                        <small class="text-muted"><?php echo date('g:i A', strtotime($ticket['created_at'])); ?></small>
+                                    </td>
                                     <td class="text-end">
                                         <button class="btn btn-sm btn-outline-primary px-3 rounded-pill" 
                                                 data-bs-toggle="modal" 
                                                 data-bs-target="#viewTicketModal"
-                                                data-ticketid="<?php echo $ticket['ticketID']; ?>">
-                                            View
+                                                data-ticketid="<?php echo $ticket['ticketID']; ?>"
+                                                data-subject="<?php echo htmlspecialchars($ticket['subject']); ?>"
+                                                data-category="<?php echo $ticket['category']; ?>"
+                                                data-priority="<?php echo $ticket['priority']; ?>"
+                                                data-status="<?php echo $ticket['status']; ?>"
+                                                data-message="<?php echo htmlspecialchars($ticket['message']); ?>"
+                                                data-created="<?php echo date('F j, Y g:i A', strtotime($ticket['created_at'])); ?>"
+                                                data-updated="<?php echo date('F j, Y g:i A', strtotime($ticket['updated_at'])); ?>">
+                                            <i class="fas fa-eye me-1"></i> View
                                         </button>
                                     </td>
                                 </tr>
@@ -223,9 +296,9 @@ $tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID OR
                 <div class="text-center py-5">
                     <i class="fas fa-headset fa-4x text-muted mb-4"></i>
                     <h5 class="fw-bold">No Support Tickets Yet</h5>
-                    <p class="text-muted">Submit a ticket if you need help.</p>
+                    <p class="text-muted">Submit a ticket if you need help with orders, deliveries, or account issues.</p>
                     <button class="btn btn-primary px-5 rounded-pill" data-bs-toggle="modal" data-bs-target="#newTicketModal">
-                        Submit New Ticket
+                        <i class="fas fa-plus me-2"></i> Submit New Ticket
                     </button>
                 </div>
             <?php endif; ?>
@@ -284,6 +357,72 @@ $tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID OR
         </div>
     </div>
 
+    <!-- View Ticket Modal -->
+    <div class="modal fade" id="viewTicketModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">
+                        <i class="fas fa-ticket-alt me-2"></i> Ticket Details
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <div>
+                                    <div class="text-muted small">Ticket ID</div>
+                                    <div class="fw-bold fs-4" id="modalTicketID"></div>
+                                </div>
+                                <div class="text-end">
+                                    <span class="badge" id="modalStatus"></span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="text-muted small">Subject</div>
+                            <div class="fw-semibold" id="modalSubject"></div>
+                        </div>
+                        
+                        <div class="col-md-3">
+                            <div class="text-muted small">Category</div>
+                            <div><span class="badge bg-secondary" id="modalCategory"></span></div>
+                        </div>
+                        
+                        <div class="col-md-3">
+                            <div class="text-muted small">Priority</div>
+                            <div><span class="badge" id="modalPriority"></span></div>
+                        </div>
+                        
+                        <div class="col-12">
+                            <div class="text-muted small">Message</div>
+                            <div class="p-3 bg-light rounded" id="modalMessage" style="white-space: pre-wrap;"></div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="text-muted small">Created</div>
+                            <div class="fw-semibold" id="modalCreated"></div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="text-muted small">Last Updated</div>
+                            <div class="fw-semibold" id="modalUpdated"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 p-4 pt-0">
+                    <div class="alert alert-info py-2 px-3 mb-0 w-100">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <small>Our support team will respond within 24 hours. You will receive an email notification when your ticket is updated.</small>
+                    </div>
+                    <button type="button" class="btn btn-light px-4" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Mobile Sidebar Toggle
@@ -301,6 +440,47 @@ $tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID OR
                 }
             });
         }
+        
+        // View Ticket Modal - Populate with data
+        const viewTicketModal = document.getElementById('viewTicketModal');
+        viewTicketModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            
+            // Get data from button attributes
+            const ticketID = button.getAttribute('data-ticketid');
+            const subject = button.getAttribute('data-subject');
+            const category = button.getAttribute('data-category');
+            const priority = button.getAttribute('data-priority');
+            const status = button.getAttribute('data-status');
+            const message = button.getAttribute('data-message');
+            const created = button.getAttribute('data-created');
+            const updated = button.getAttribute('data-updated');
+            
+            // Populate modal fields
+            document.getElementById('modalTicketID').innerHTML = '#' + ticketID;
+            document.getElementById('modalSubject').innerHTML = subject;
+            document.getElementById('modalCategory').innerHTML = category;
+            document.getElementById('modalPriority').innerHTML = priority;
+            document.getElementById('modalStatus').innerHTML = status;
+            document.getElementById('modalMessage').innerHTML = message;
+            document.getElementById('modalCreated').innerHTML = created;
+            document.getElementById('modalUpdated').innerHTML = updated;
+            
+            // Set priority badge color
+            const priorityBadge = document.getElementById('modalPriority');
+            priorityBadge.className = 'badge';
+            if (priority === 'Low') priorityBadge.classList.add('bg-info');
+            else if (priority === 'Medium') priorityBadge.classList.add('bg-warning');
+            else if (priority === 'High') priorityBadge.classList.add('bg-danger');
+            
+            // Set status badge color
+            const statusBadge = document.getElementById('modalStatus');
+            statusBadge.className = 'badge';
+            if (status === 'Open') statusBadge.classList.add('bg-success');
+            else if (status === 'In Progress') statusBadge.classList.add('bg-warning');
+            else if (status === 'Resolved') statusBadge.classList.add('bg-primary');
+            else if (status === 'Closed') statusBadge.classList.add('bg-secondary');
+        });
     </script>
 </body>
 </html>

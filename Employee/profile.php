@@ -180,6 +180,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
         <div class="nav-menu px-3 mt-2">
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="employee_dashboard.php" class="nav-link"><i class="fas fa-tachometer-alt me-3"></i> <span>Dashboard</span></a></li>
+                <li class="nav-item"><a href="attendance.php" class="nav-link"><i class="fas fa-clock me-3"></i> <span>Attendance</span></a></li>
+                <li class="nav-item"><a href="payslip.php" class="nav-link"><i class="fas fa-file-invoice-dollar me-3"></i> <span>My Payslip</span></a></li>
                 <li class="nav-item"><a href="my_deliveries.php" class="nav-link"><i class="fas fa-truck me-3"></i> <span>My Deliveries</span></a></li>
                 <li class="nav-item"><a href="profile.php" class="nav-link active"><i class="fas fa-user me-3"></i> <span>My Profile</span></a></li>
             </ul>
@@ -205,26 +207,57 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
                 </div>
             </div>
             
-            <div class="dropdown">
-                <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                    <?php if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])): ?>
-                        <img src="../<?php echo $employee['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
-                    <?php else: ?>
-                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                            <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
+            <div class="d-flex align-items-center gap-3">
+                <!-- Notification Bell -->
+                <div class="dropdown">
+                    <button class="btn btn-light position-relative" data-bs-toggle="dropdown" style="width: 42px; height: 42px; border-radius: 12px;">
+                        <i class="fas fa-bell fa-lg"></i>
+                        <?php 
+                        $unreadCount = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['count'] ?? 0;
+                        if ($unreadCount > 0): 
+                        ?>
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 9px; padding: 2px 6px;">
+                                <?php echo min($unreadCount, 9); ?><?php echo $unreadCount > 9 ? '+' : ''; ?>
+                            </span>
+                        <?php endif; ?>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow" style="width: 320px; max-height: 400px; overflow-y: auto;">
+                        <li class="dropdown-header fw-bold">Notifications</li>
+                        <?php 
+                        $notifs = $conn->query("SELECT * FROM notifications WHERE userID = $userID ORDER BY created_at DESC LIMIT 5");
+                        if ($notifs->num_rows > 0):
+                            while ($n = $notifs->fetch_assoc()):
+                        ?>
+                            <li><a class="dropdown-item small" href="notifications.php"><?php echo htmlspecialchars($n['message']); ?></a></li>
+                        <?php endwhile; else: ?>
+                            <li><span class="dropdown-item text-muted small">No new notifications</span></li>
+                        <?php endif; ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-center small text-primary" href="notifications.php">View All</a></li>
+                    </ul>
+                </div>
+                
+                <div class="dropdown">
+                    <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
+                        <?php if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])): ?>
+                            <img src="../<?php echo $employee['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
+                        <?php else: ?>
+                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
+                                <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
+                            </div>
+                        <?php endif; ?>
+                        <div class="text-start d-none d-md-block">
+                            <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>
+                            <small class="text-muted">Employee</small>
                         </div>
-                    <?php endif; ?>
-                    <div class="text-start d-none d-md-block">
-                        <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>
-                        <small class="text-muted">Employee</small>
-                    </div>
-                    <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end shadow">
-                    <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
-                </ul>
+                        <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow">
+                        <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                    </ul>
+                </div>
             </div>
         </div>
 

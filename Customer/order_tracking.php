@@ -90,12 +90,14 @@ $stmt->close();
         .status-processing { background: #cce5ff; color: #004085; }
         .status-delivery { background: #d4edda; color: #155724; }
         .status-delivered { background: #28a745; color: white; }
+        .status-cancelled { background: #f8d7da; color: #721c24; }
         .timeline { position: relative; padding-left: 30px; }
         .timeline::before { content: ''; position: absolute; left: 15px; top: 0; bottom: 0; width: 3px; background: #e9ecef; }
         .timeline-step { position: relative; margin-bottom: 20px; }
         .timeline-step::before { content: ''; position: absolute; left: -30px; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #0077B6; z-index: 2; }
         .timeline-step.completed::before { background: #28a745; border-color: #28a745; }
         .timeline-step.current::before { background: #0077B6; border-color: #0077B6; animation: pulse 2s infinite; }
+        .timeline-step.cancelled::before { background: #dc3545; border-color: #dc3545; }
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,119,182,0.4); } 70% { box-shadow: 0 0 0 10px rgba(0,119,182,0); } 100% { box-shadow: 0 0 0 0 rgba(0,119,182,0); } }
 
         /* Mobile Responsive */
@@ -124,7 +126,7 @@ $stmt->close();
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="customer_dashboard.php" class="nav-link"><i class="fas fa-home me-3"></i> <span>Dashboard</span></a></li>
                 <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Products</span></a></li>
-                <li class="nav-item"><a href="orders.php" class="nav-link"><i class="fas fa-shopping-cart me-3"></i> <span>Place Order</span></a></li>
+                
                 <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history me-3"></i> <span>Order History</span></a></li>
                 <li class="nav-item"><a href="order_tracking.php" class="nav-link active"><i class="fas fa-map-marker-alt me-3"></i> <span>Track Orders</span></a></li>
                 <li class="nav-item"><a href="recurring_orders.php" class="nav-link"><i class="fas fa-redo me-3"></i> <span>Recurring Orders</span></a></li>
@@ -192,6 +194,7 @@ $stmt->close();
                     if ($status == 'Processing') $badgeClass = 'status-processing';
                     if ($status == 'Out for Delivery') $badgeClass = 'status-delivery';
                     if ($status == 'Delivered') $badgeClass = 'status-delivered';
+                    if ($status == 'Cancelled') $badgeClass = 'status-cancelled';
                 ?>
                     <div class="col-lg-6">
                         <div class="order-card p-4">
@@ -220,11 +223,12 @@ $stmt->close();
                             
                             <!-- Timeline -->
                             <div class="timeline mt-4">
-                                <div class="timeline-step <?php echo ($status != 'Pending') ? 'completed' : 'current'; ?>">
+                                <div class="timeline-step <?php echo ($status != 'Pending' && $status != 'Cancelled') ? 'completed' : ($status == 'Pending' ? 'current' : 'cancelled'); ?>">
                                     <div class="fw-semibold">Order Placed</div>
                                     <small class="text-muted"><?php echo date('M j, g:i A', strtotime($order['order_date'])); ?></small>
                                 </div>
                                 
+                                <?php if ($status != 'Cancelled'): ?>
                                 <div class="timeline-step <?php echo ($status == 'Processing' || $status == 'Out for Delivery' || $status == 'Delivered') ? 'completed' : ($status == 'Pending' ? '' : 'current'); ?>">
                                     <div class="fw-semibold">Processing</div>
                                     <small class="text-muted">Preparing your order</small>
@@ -239,18 +243,67 @@ $stmt->close();
                                     <div class="fw-semibold">Delivered</div>
                                     <small class="text-muted">Enjoy your water!</small>
                                 </div>
+                                <?php else: ?>
+                                <div class="timeline-step cancelled">
+                                    <div class="fw-semibold text-danger">Order Cancelled</div>
+                                    <small class="text-muted">This order has been cancelled</small>
+                                </div>
+                                <?php endif; ?>
                             </div>
                             
-                            <div class="mt-4 pt-3 border-top d-flex gap-2">
-                                <button class="btn btn-outline-primary btn-sm flex-grow-1" data-bs-toggle="modal" data-bs-target="#trackModal<?php echo $order['orderID']; ?>">
+                            <div class="mt-4 pt-3 border-top">
+                                <button class="btn btn-outline-primary btn-sm w-100" data-bs-toggle="modal" data-bs-target="#trackModal<?php echo $order['orderID']; ?>">
                                     <i class="fas fa-map-marker-alt me-1"></i> View Details
                                 </button>
-                                
-                                <?php if ($status != 'Delivered'): ?>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="contactSupport(<?php echo $order['orderID']; ?>)">
-                                        <i class="fas fa-headset me-1"></i> Support
-                                    </button>
-                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Order Detail Modal -->
+                    <div class="modal fade" id="trackModal<?php echo $order['orderID']; ?>" tabindex="-1">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title fw-bold">Order #<?php echo $order['orderID']; ?> Details</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="row g-3">
+                                        <div class="col-6">
+                                            <div class="text-muted small">Order Date</div>
+                                            <div class="fw-semibold"><?php echo date('F j, Y g:i A', strtotime($order['order_date'])); ?></div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="text-muted small">Status</div>
+                                            <div><span class="status-badge <?php echo $badgeClass; ?>"><?php echo $status; ?></span></div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="text-muted small">Product</div>
+                                            <div class="fw-semibold"><?php echo $order['ProductName']; ?></div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="text-muted small">Quantity</div>
+                                            <div class="fw-semibold"><?php echo $order['quantity']; ?> gallons</div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="text-muted small">Total Amount</div>
+                                            <div class="fw-bold text-success">₱<?php echo number_format($order['total_amount'], 2); ?></div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="text-muted small">Payment Method</div>
+                                            <div class="fw-semibold"><?php echo $order['payment_method']; ?></div>
+                                        </div>
+                                        <?php if ($order['delivery_date']): ?>
+                                        <div class="col-12">
+                                            <div class="text-muted small">Scheduled Delivery</div>
+                                            <div class="fw-semibold"><?php echo date('F j, Y', strtotime($order['delivery_date'])); ?></div>
+                                        </div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                <div class="modal-footer border-0 p-4 pt-0">
+                                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -268,10 +321,6 @@ $stmt->close();
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        function contactSupport(orderID) {
-            alert("Support ticket feature coming soon! For now, please contact us at support@dechavezwaterhaus.com");
-        }
-        
         // Mobile Sidebar Toggle
         const sidebar = document.getElementById('sidebar');
         const mobileToggle = document.getElementById('mobileToggle');

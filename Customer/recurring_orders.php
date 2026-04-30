@@ -167,7 +167,7 @@ $addresses = $conn->query("SELECT * FROM delivery_addresses WHERE userID = $user
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="customer_dashboard.php" class="nav-link"><i class="fas fa-home me-3"></i> <span>Dashboard</span></a></li>
                 <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Products</span></a></li>
-                <li class="nav-item"><a href="orders.php" class="nav-link"><i class="fas fa-shopping-cart me-3"></i> <span>Place Order</span></a></li>
+    
                 <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history me-3"></i> <span>Order History</span></a></li>
                 <li class="nav-item"><a href="order_tracking.php" class="nav-link"><i class="fas fa-map-marker-alt me-3"></i> <span>Track Orders</span></a></li>
                 <li class="nav-item"><a href="recurring_orders.php" class="nav-link active"><i class="fas fa-redo me-3"></i> <span>Recurring Orders</span></a></li>

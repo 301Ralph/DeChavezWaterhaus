@@ -1,0 +1,179 @@
+<?php
+include '../includes/connection.php';
+session_start();
+
+if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'employee') {
+    echo '<script>alert("Access denied. Employees only."); window.location = "../login.php";</script>';
+    exit();
+}
+
+$userID = $_SESSION['userID'];
+$userName = $_SESSION['userName'];
+
+// Mark all as read when visiting the page
+$conn->query("UPDATE notifications SET is_read = 1 WHERE userID = $userID");
+
+// Fetch notifications
+$notifs = $conn->query("SELECT * FROM notifications WHERE userID = $userID ORDER BY created_at DESC LIMIT 50");
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifications • Employee</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
+    <style>
+        :root { --primary: #0077B6; --primary-dark: #023E8A; }
+        body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
+        
+        .sidebar { 
+            position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
+            background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
+            transition: all 0.3s ease; 
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
+        .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
+        .sidebar .nav-link { 
+            color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; 
+            font-weight: 500; transition: all 0.3s ease; border-radius: 12px; margin: 4px 10px;
+        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { 
+            background-color: #f0f7ff; color: var(--primary); 
+        }
+        .sidebar .nav-link i { width: 22px; font-size: 1.1rem; }
+        
+        .main-content { margin-left: 260px; padding: 30px; transition: margin-left 0.3s ease; }
+        
+        .nav-menu { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+        .logout-section { padding: 15px 10px; border-top: 1px solid #eee; background: white; }
+        
+        @media (max-width: 991.98px) {
+            .main-content { margin-left: 0; padding: 20px; }
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.show { transform: translateX(0); }
+        }
+        
+        .notification-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.2s ease;
+        }
+        .notification-item:hover { background-color: #f8f9fa; }
+        .notification-item.unread { background-color: #e8f4ff; border-left: 4px solid #0077B6; }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
+            <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
+            <div>
+                <span class="fw-bold fs-5">De Chavez Waterhaus</span>
+                <small class="d-block text-muted">Employee Portal</small>
+            </div>
+        </div>
+        
+        <div class="nav-menu px-3 mt-2">
+            <ul class="nav flex-column">
+                <li class="nav-item"><a href="employee_dashboard.php" class="nav-link"><i class="fas fa-tachometer-alt me-3"></i> <span>Dashboard</span></a></li>
+                <li class="nav-item"><a href="attendance.php" class="nav-link"><i class="fas fa-clock me-3"></i> <span>Attendance</span></a></li>
+                <li class="nav-item"><a href="payslip.php" class="nav-link"><i class="fas fa-file-invoice-dollar me-3"></i> <span>My Payslip</span></a></li>
+                <li class="nav-item"><a href="leave_request.php" class="nav-link"><i class="fas fa-calendar-alt me-3"></i> <span>Leave Requests</span></a></li>
+                <li class="nav-item"><a href="my_deliveries.php" class="nav-link"><i class="fas fa-truck me-3"></i> <span>My Deliveries</span></a></li>
+                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>My Profile</span></a></li>
+            </ul>
+        </div>
+        
+        <div class="logout-section">
+            <ul class="nav flex-column">
+                <li class="nav-item"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Top Navbar -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="d-flex align-items-center">
+                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div>
+                    <h4 class="fw-bold mb-0">Notifications</h4>
+                    <p class="text-muted mb-0">Stay updated with your activities</p>
+                </div>
+            </div>
+            
+            <div class="dropdown">
+                <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
+                    <?php if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])): ?>
+                        <img src="../<?php echo $employee['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
+                    <?php else: ?>
+                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
+                            <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
+                        </div>
+                    <?php endif; ?>
+                    <div class="text-start d-none d-md-block">
+                        <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>
+                        <small class="text-muted">Employee</small>
+                    </div>
+                    <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow">
+                    <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <?php if ($notifs->num_rows > 0): ?>
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <h6 class="fw-bold mb-0"><i class="fas fa-bell me-2"></i> All Notifications</h6>
+                </div>
+                <div class="card-body p-0">
+                    <?php while ($notif = $notifs->fetch_assoc()): ?>
+                        <div class="notification-item <?php echo $notif['is_read'] ? '' : 'unread'; ?>">
+                            <div class="d-flex">
+                                <div class="me-3">
+                                    <i class="fas fa-bell fa-2x text-primary"></i>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <div class="fw-semibold"><?php echo htmlspecialchars($notif['message']); ?></div>
+                                    <small class="text-muted"><?php echo date('F j, Y g:i A', strtotime($notif['created_at'])); ?></small>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endwhile; ?>
+                </div>
+            </div>
+        <?php else: ?>
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center py-5">
+                    <i class="fas fa-bell-slash fa-4x text-muted mb-4"></i>
+                    <h5 class="fw-bold">No Notifications Yet</h5>
+                    <p class="text-muted">You're all caught up!</p>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const sidebar = document.getElementById('sidebar');
+        const mobileToggle = document.getElementById('mobileToggle');
+        if (mobileToggle) {
+            mobileToggle.addEventListener('click', () => sidebar.classList.toggle('show'));
+        }
+    </script>
+</body>
+</html>
