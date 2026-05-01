@@ -54,26 +54,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_photo'])) {
     }
 }
 
-// Fetch assigned orders (if any)
+// Fetch assigned orders (from deliveries table - where assignments are stored)
 $assignedOrders = 0;
 try {
-    $result = $conn->query("SELECT COUNT(*) as count FROM orders WHERE assigned_employee = $userID AND status IN ('Pending', 'Processing', 'Out for Delivery')");
+    $result = $conn->query("
+        SELECT COUNT(*) as count 
+        FROM deliveries d
+        JOIN orders o ON d.orderID = o.orderID
+        WHERE d.riderID = $userID 
+        AND o.status IN ('Pending', 'Processing', 'Out for Delivery')
+    ");
     if ($result) {
         $assignedOrders = $result->fetch_assoc()['count'] ?? 0;
     }
 } catch (Exception $e) {
-    // Column might not exist yet
+    // Tables might not exist yet
 }
 
 // Fetch completed deliveries
 $completedDeliveries = 0;
 try {
-    $result = $conn->query("SELECT COUNT(*) as count FROM orders WHERE assigned_employee = $userID AND status = 'Delivered'");
+    $result = $conn->query("
+        SELECT COUNT(*) as count 
+        FROM deliveries d
+        JOIN orders o ON d.orderID = o.orderID
+        WHERE d.riderID = $userID 
+        AND o.status = 'Delivered'
+    ");
     if ($result) {
         $completedDeliveries = $result->fetch_assoc()['count'] ?? 0;
     }
 } catch (Exception $e) {
-    // Column might not exist yet
+    // Tables might not exist yet
 }
 ?>
 

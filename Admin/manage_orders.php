@@ -12,6 +12,30 @@ $adminName = $_SESSION['userName'] ?? 'Admin';
 // Fetch admin data for profile picture
 $admin = $conn->query("SELECT * FROM customers WHERE userID = " . $_SESSION['userID'])->fetch_assoc();
 
+// Handle Accept Pending Order (with receipt verification)
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['accept_order'])) {
+    $orderID = intval($_POST['orderID']);
+    
+    // Update status to Processing
+    $stmt = $conn->prepare("UPDATE orders SET status = 'Processing' WHERE orderID = ?");
+    $stmt->bind_param("i", $orderID);
+    $stmt->execute();
+    $stmt->close();
+    
+    // Create notification for customer
+    $order = $conn->query("SELECT userID FROM orders WHERE orderID = $orderID")->fetch_assoc();
+    if ($order) {
+        $message = "Your order #$orderID has been accepted and is now being processed!";
+        $stmt = $conn->prepare("INSERT INTO notifications (userID, message) VALUES (?, ?)");
+        $stmt->bind_param("is", $order['userID'], $message);
+        $stmt->execute();
+        $stmt->close();
+    }
+    
+    echo '<script>alert("Order accepted! Status changed to Processing."); window.location = "manage_orders.php";</script>';
+    exit();
+}
+
 // Handle status update
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
     $orderID = intval($_POST['orderID']);
@@ -23,9 +47,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
     $stmt->execute();
     $stmt->close();
 
-    // If assigning to employee
+    // If assigning to employee and status is Out for Delivery
     if ($employeeID && $newStatus == 'Out for Delivery') {
-        $conn->query("UPDATE deliveries SET riderID = $employeeID, delivery_status = 'Assigned' WHERE orderID = $orderID");
+        // Check if delivery record exists
+        $checkDelivery = $conn->query("SELECT deliveryID FROM deliveries WHERE orderID = $orderID");
+        if ($checkDelivery->num_rows > 0) {
+            // Update existing delivery record
+            $conn->query("UPDATE deliveries SET riderID = $employeeID, status = 'In Transit' WHERE orderID = $orderID");
+        } else {
+            // Create new delivery record
+            $conn->query("INSERT INTO deliveries (orderID, riderID, delivery_date, status) VALUES ($orderID, $employeeID, CURDATE(), 'In Transit')");
+        }
     }
 
     // Create notification for customer
@@ -42,16 +74,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
     exit();
 }
 
-// Fetch all orders with customer info
+// Fetch pending orders (need receipt verification before accepting)
+$pendingOrders = $conn->query("
+    SELECT o.*, CONCAT(c.Firstname, ' ', c.Lastname) as customer_name, c.Contact as customer_phone,
+           p.ProductName, oi.quantity
+    FROM orders o
+    JOIN customers c ON o.userID = c.userID
+    LEFT JOIN order_items oi ON o.orderID = oi.orderID
+    LEFT JOIN product p ON oi.productID = p.ProductID
+    WHERE o.status = 'Pending'
+    ORDER BY o.order_date DESC
+");
+
+// Fetch all other orders (Processing, Out for Delivery, Delivered, Cancelled)
 $orders = $conn->query("
     SELECT o.*, CONCAT(c.Firstname, ' ', c.Lastname) as customer_name, c.Contact as customer_phone,
            d.delivery_date, d.riderID,
-           p.ProductName, oi.quantity
+           p.ProductName, oi.quantity,
+           CONCAT(e.Firstname, ' ', e.Lastname) as employee_name
     FROM orders o
     JOIN customers c ON o.userID = c.userID
     LEFT JOIN deliveries d ON o.orderID = d.orderID
     LEFT JOIN order_items oi ON o.orderID = oi.orderID
     LEFT JOIN product p ON oi.productID = p.ProductID
+    LEFT JOIN customers e ON d.riderID = e.userID
+    WHERE o.status != 'Pending'
     ORDER BY o.order_date DESC
 ");
 
@@ -72,6 +119,7 @@ while ($e = $employees->fetch_assoc()) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <!-- DataTables removed - using simple table -->
     <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
         :root { --primary: #0077B6; --primary-dark: #023E8A; }
@@ -130,6 +178,42 @@ while ($e = $employees->fetch_assoc()) {
         }
         
         .status-badge { padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; }
+        .table thead th { font-weight: 600; border-bottom: 2px solid #dee2e6; }
+        .table tbody tr:hover { background-color: #f8f9fa; }
+        .table td { vertical-align: middle; }
+        
+        /* Simple table styling - DataTables removed */
+        
+        .dataTables_wrapper .dataTables_info {
+            color: #6c757d;
+            font-size: 0.9rem;
+            padding-top: 15px;
+        }
+        
+        .table thead th {
+            border-bottom: 2px solid #e9ecef;
+            font-weight: 600;
+            color: #495057;
+            padding: 15px 12px;
+        }
+        
+        .table tbody tr {
+            transition: all 0.2s ease;
+        }
+        
+        .table tbody tr:hover {
+            background-color: #f8f9fa;
+            transform: scale(1.01);
+        }
+        
+        .table td {
+            padding: 15px 12px;
+            vertical-align: middle;
+        }
+        
+        .dataTables_wrapper {
+            padding: 20px;
+        }
     </style>
 </head>
 <body>
@@ -234,6 +318,116 @@ while ($e = $employees->fetch_assoc()) {
             </div>
         </div>
 
+        <!-- Pending Orders Section (Need Receipt Verification) -->
+        <?php if ($pendingOrders && $pendingOrders->num_rows > 0): ?>
+        <div class="card border-0 shadow-sm mb-4" style="border-left: 4px solid #ffc107;">
+            <div class="card-header bg-warning bg-opacity-10 border-0 py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="fw-bold mb-0 text-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i> Pending Orders - Awaiting Receipt Verification
+                        </h6>
+                        <small class="text-muted">Review GCash receipts before accepting these orders</small>
+                    </div>
+                    <span class="badge bg-warning text-dark"><?php echo $pendingOrders->num_rows; ?> Pending</span>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="ps-4">Order ID</th>
+                                <th>Customer</th>
+                                <th>Product</th>
+                                <th>Amount</th>
+                                <th>Payment</th>
+                                <th>Date</th>
+                                <th class="text-end pe-4">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php while ($pending = $pendingOrders->fetch_assoc()) { ?>
+                                <tr>
+                                    <td class="ps-4"><strong>#<?php echo $pending['orderID']; ?></strong></td>
+                                    <td>
+                                        <div class="fw-semibold"><?php echo htmlspecialchars($pending['customer_name']); ?></div>
+                                        <small class="text-muted"><?php echo $pending['customer_phone']; ?></small>
+                                    </td>
+                                    <td>
+                                        <div class="fw-semibold"><?php echo htmlspecialchars($pending['ProductName'] ?? 'N/A'); ?></div>
+                                        <small class="text-muted">x<?php echo $pending['quantity'] ?? 0; ?></small>
+                                    </td>
+                                    <td class="fw-bold">₱<?php echo number_format($pending['total_amount'], 2); ?></td>
+                                    <td>
+                                        <span class="badge bg-<?php echo $pending['payment_method'] == 'GCash' ? 'info' : 'secondary'; ?>">
+                                            <?php echo $pending['payment_method']; ?>
+                                        </span>
+                                        <?php if ($pending['payment_method'] == 'GCash' && !empty($pending['notes'])): ?>
+                                            <button class="btn btn-sm btn-outline-primary ms-1" data-bs-toggle="modal" data-bs-target="#receiptModal<?php echo $pending['orderID']; ?>">
+                                                <i class="fas fa-receipt"></i> View Receipt
+                                            </button>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="small text-muted"><?php echo date('M j, Y', strtotime($pending['order_date'])); ?></td>
+                                    <td class="text-end pe-4">
+                                        <form method="POST" class="d-inline" onsubmit="return confirm('Accept this order and change status to Processing?')">
+                                            <input type="hidden" name="orderID" value="<?php echo $pending['orderID']; ?>">
+                                            <button type="submit" name="accept_order" class="btn btn-success btn-sm">
+                                                <i class="fas fa-check me-1"></i> Accept Order
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+
+                                <!-- Receipt Modal -->
+                                <?php if ($pending['payment_method'] == 'GCash' && !empty($pending['notes'])): ?>
+                                <div class="modal fade" id="receiptModal<?php echo $pending['orderID']; ?>" tabindex="-1">
+                                    <div class="modal-dialog modal-dialog-centered modal-lg">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title fw-bold">GCash Receipt - Order #<?php echo $pending['orderID']; ?></h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <div class="modal-body text-center">
+                                                <?php 
+                                                    // Extract file path from notes (format: "GCash Receipt: uploads/receipts/filename.jpg")
+                                                    $receiptPath = $pending['notes'];
+                                                    if (strpos($receiptPath, 'GCash Receipt: ') === 0) {
+                                                        $receiptPath = substr($receiptPath, strlen('GCash Receipt: '));
+                                                    }
+                                                    $fullPath = '../' . $receiptPath;
+                                                    ?>
+                                                    <?php if (file_exists($fullPath)): ?>
+                                                        <img src="<?php echo htmlspecialchars($fullPath); ?>" class="img-fluid rounded" style="max-height: 500px;" alt="GCash Receipt">
+                                                    <?php else: ?>
+                                                        <div class="alert alert-warning">
+                                                            <i class="fas fa-exclamation-triangle me-2"></i>
+                                                            Receipt file not found: <?php echo htmlspecialchars($receiptPath); ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button>
+                                                <form method="POST" class="d-inline" onsubmit="return confirm('Accept this order?')">
+                                                    <input type="hidden" name="orderID" value="<?php echo $pending['orderID']; ?>">
+                                                    <button type="submit" name="accept_order" class="btn btn-success">
+                                                        <i class="fas fa-check me-1"></i> Accept & Process Order
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                            <?php } ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- Orders Table -->
         <div class="card border-0 shadow-sm">
             <div class="card-body p-0">
@@ -247,6 +441,7 @@ while ($e = $employees->fetch_assoc()) {
                                 <th>Amount</th>
                                 <th>Payment</th>
                                 <th>Status</th>
+                                <th>Assigned To</th>
                                 <th>Date</th>
                                 <th class="text-end pe-4">Actions</th>
                             </tr>
@@ -280,6 +475,15 @@ while ($e = $employees->fetch_assoc()) {
                                             elseif ($order['status'] == 'Cancelled') $statusClass = 'bg-danger text-white';
                                             ?>
                                             <span class="status-badge <?php echo $statusClass; ?>"><?php echo $order['status']; ?></span>
+                                        </td>
+                                        <td>
+                                            <?php if (!empty($order['employee_name'])): ?>
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-user me-1"></i> <?php echo htmlspecialchars($order['employee_name']); ?>
+                                                </span>
+                                            <?php else: ?>
+                                                <span class="text-muted small">Not assigned</span>
+                                            <?php endif; ?>
                                         </td>
                                         <td class="small text-muted"><?php echo date('M j, Y', strtotime($order['order_date'])); ?></td>
                                         <td class="text-end pe-4">
@@ -339,7 +543,7 @@ while ($e = $employees->fetch_assoc()) {
                                 <?php } ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="8" class="text-center py-5 text-muted">
+                                    <td colspan="9" class="text-center py-5 text-muted">
                                         <i class="fas fa-inbox fa-3x mb-3 opacity-50"></i>
                                         <p>No orders yet.</p>
                                     </td>
@@ -353,6 +557,8 @@ while ($e = $employees->fetch_assoc()) {
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- DataTables removed - using simple Bootstrap table -->
     <script>
         // Mobile Sidebar Toggle
         const sidebar = document.getElementById('sidebar');
@@ -380,6 +586,8 @@ while ($e = $employees->fetch_assoc()) {
                 }
             });
         });
+
+        // Simple table - no DataTables needed
     </script>
 </body>
 </html>

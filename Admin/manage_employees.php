@@ -67,8 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_employee'])) {
     // Hash password
     $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
     
-    // Insert new employee with role 'employee'
-    $stmt = $conn->prepare("INSERT INTO customers (Firstname, Lastname, Email, Contact, Password, Role) VALUES (?, ?, ?, ?, ?, 'employee')");
+    // Insert new employee with auto-approved status (owner creating account)
+    $stmt = $conn->prepare("INSERT INTO customers (Firstname, Lastname, Email, Contact, Password, Role, verification_status, isVerified) VALUES (?, ?, ?, ?, ?, 'employee', 'approved', 1)");
     $stmt->bind_param("sssss", $firstname, $lastname, $email, $phone, $hashedPassword);
     
     if ($stmt->execute()) {
@@ -84,6 +84,77 @@ if (isset($_GET['delete'])) {
     $userID = intval($_GET['delete']);
     $conn->query("DELETE FROM customers WHERE userID = $userID AND Role = 'employee'");
     echo '<script>window.location = "manage_employees.php";</script>';
+    exit();
+}
+
+// Handle Update Employee (Email/Password)
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_employee'])) {
+    $userID = intval($_POST['userID']);
+    $newEmail = trim(filter_var($_POST['new_email'], FILTER_SANITIZE_EMAIL));
+    $newPassword = $_POST['new_password'] ?? '';
+    
+    $errors = [];
+    
+    // Validate email
+    if (!empty($newEmail) && !filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = "Invalid email format";
+    }
+    
+    // Check if email already exists (for another user)
+    if (!empty($newEmail)) {
+        $emailCheck = $conn->prepare("SELECT userID FROM customers WHERE Email = ? AND userID != ?");
+        $emailCheck->bind_param("si", $newEmail, $userID);
+        $emailCheck->execute();
+        if ($emailCheck->get_result()->num_rows > 0) {
+            $errors[] = "Email already exists for another account";
+        }
+        $emailCheck->close();
+    }
+    
+    if (!empty($errors)) {
+        echo '<script>alert("' . implode('\\n', $errors) . '"); window.location = "manage_employees.php";</script>';
+        exit();
+    }
+    
+    // Build update query
+    $updates = [];
+    $params = [];
+    $types = '';
+    
+    if (!empty($newEmail)) {
+        $updates[] = "Email = ?";
+        $params[] = $newEmail;
+        $types .= 's';
+    }
+    
+    if (!empty($newPassword)) {
+        if (strlen($newPassword) < 8) {
+            echo '<script>alert("Password must be at least 8 characters"); window.location = "manage_employees.php";</script>';
+            exit();
+        }
+        $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+        $updates[] = "Password = ?";
+        $params[] = $hashedPassword;
+        $types .= 's';
+    }
+    
+    if (!empty($updates)) {
+        $params[] = $userID;
+        $types .= 'i';
+        
+        $sql = "UPDATE customers SET " . implode(', ', $updates) . " WHERE userID = ? AND Role = 'employee'";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
+        
+        if ($stmt->execute()) {
+            echo '<script>alert("Employee updated successfully!"); window.location = "manage_employees.php";</script>';
+        } else {
+            echo '<script>alert("Error updating employee"); window.location = "manage_employees.php";</script>';
+        }
+        $stmt->close();
+    } else {
+        echo '<script>alert("No changes made"); window.location = "manage_employees.php";</script>';
+    }
     exit();
 }
 
@@ -283,15 +354,29 @@ $employees = $conn->query("SELECT * FROM customers WHERE Role = 'employee' ORDER
                                 <?php while ($emp = $employees->fetch_assoc()) { ?>
                                     <tr>
                                         <td class="ps-4">
-                                            <div class="fw-semibold"><?php echo htmlspecialchars($emp['Firstname'] . ' ' . $emp['Lastname']); ?></div>
+                                            <div class="d-flex align-items-center gap-2">
+                                                <?php if (!empty($emp['profile_picture']) && file_exists('../' . $emp['profile_picture'])): ?>
+                                                    <img src="../<?php echo $emp['profile_picture']; ?>" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #e9ecef;">
+                                                <?php else: ?>
+                                                    <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 36px; height: 36px; font-size: 0.9rem;">
+                                                        <?php echo strtoupper(substr($emp['Firstname'], 0, 1) . substr($emp['Lastname'], 0, 1)); ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                                <div class="fw-semibold"><?php echo htmlspecialchars($emp['Firstname'] . ' ' . $emp['Lastname']); ?></div>
+                                            </div>
                                         </td>
                                         <td><?php echo htmlspecialchars($emp['Email']); ?></td>
                                         <td><?php echo htmlspecialchars($emp['Contact'] ?? 'N/A'); ?></td>
                                         <td class="small text-muted"><?php echo date('M j, Y', strtotime($emp['created_at'])); ?></td>
                                         <td class="text-end pe-4">
-                                            <a href="manage_employees.php?delete=<?php echo $emp['userID']; ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this employee?')">
-                                                <i class="fas fa-trash"></i>
-                                            </a>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editEmployeeModal<?php echo $emp['userID']; ?>" title="Edit Email/Password">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <a href="manage_employees.php?delete=<?php echo $emp['userID']; ?>" class="btn btn-outline-danger" onclick="return confirm('Delete this employee?')" title="Delete Employee">
+                                                    <i class="fas fa-trash"></i>
+                                                </a>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php } ?>
@@ -309,6 +394,52 @@ $employees = $conn->query("SELECT * FROM customers WHERE Role = 'employee' ORDER
             </div>
         </div>
     </div>
+
+    <!-- Edit Employee Modals -->
+    <?php 
+    // Reset employees result pointer
+    $employees->data_seek(0);
+    while ($emp = $employees->fetch_assoc()) { 
+    ?>
+    <div class="modal fade" id="editEmployeeModal<?php echo $emp['userID']; ?>" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Edit Employee: <?php echo htmlspecialchars($emp['Firstname'] . ' ' . $emp['Lastname']); ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST">
+                    <input type="hidden" name="userID" value="<?php echo $emp['userID']; ?>">
+                    <div class="modal-body p-4">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">New Email (optional)</label>
+                            <input type="email" class="form-control" name="new_email" placeholder="<?php echo htmlspecialchars($emp['Email']); ?>">
+                            <small class="text-muted">Leave empty to keep current email</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">New Password (optional)</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" name="new_password" placeholder="Enter new password">
+                                <button class="btn btn-outline-secondary" type="button" onclick="generatePasswordForEdit(this)">
+                                    <i class="fas fa-magic"></i>
+                                </button>
+                            </div>
+                            <small class="text-muted">Leave empty to keep current password. Min 8 chars.</small>
+                        </div>
+                        <div class="alert alert-info py-2 px-3 mb-0">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <small>Employee will use new credentials to login. They can change password later.</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0 p-4 pt-0">
+                        <button type="button" class="btn btn-light px-4" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" name="update_employee" class="btn btn-primary px-5">Update Employee</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <?php } ?>
 
     <!-- Add Employee Modal -->
     <div class="modal fade" id="addEmployeeModal" tabindex="-1">
@@ -338,14 +469,22 @@ $employees = $conn->query("SELECT * FROM customers WHERE Role = 'employee' ORDER
                                 <input type="tel" class="form-control" name="phone" required pattern="[0-9+\-\s]+" title="Only numbers, +, - and spaces allowed">
                             </div>
                             <div class="col-12">
+                                <label class="form-label fw-semibold">Profile Picture (Optional)</label>
+                                <input type="file" class="form-control" name="profile_picture" accept="image/*">
+                                <small class="text-muted">Upload employee photo (JPG, PNG, max 2MB)</small>
+                            </div>
+                            <div class="col-12">
                                 <label class="form-label fw-semibold">Password <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <input type="password" class="form-control" name="password" id="password" required minlength="8" pattern="(?=.*[A-Z])(?=.*[0-9]).{8,}" title="At least 8 characters with 1 uppercase and 1 number">
-                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePassword()">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePassword()" title="Show/Hide Password">
                                         <i class="fas fa-eye" id="passwordIcon"></i>
                                     </button>
+                                    <button class="btn btn-outline-primary" type="button" onclick="generatePassword()" title="Auto-generate secure password">
+                                        <i class="fas fa-magic me-1"></i> Generate
+                                    </button>
                                 </div>
-                                <small class="text-muted">Min 8 chars, 1 uppercase, 1 number</small>
+                                <small class="text-muted">Min 8 chars, 1 uppercase, 1 number. Click "Generate" for auto-password.</small>
                             </div>
                         </div>
                     </div>
@@ -383,6 +522,57 @@ $employees = $conn->query("SELECT * FROM customers WHERE Role = 'employee' ORDER
                 icon.classList.remove('fa-eye-slash');
                 icon.classList.add('fa-eye');
             }
+        }
+
+        // Auto-generate password with shop name
+        function generatePassword() {
+            const shopName = 'DeChavez';
+            const year = new Date().getFullYear();
+            const symbols = '!@#$%';
+            const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+            
+            // Create password: ShopName + Year + Symbol + RandomNumber
+            // Example: DeChavez2026!42
+            const randomNum = Math.floor(Math.random() * 99) + 10; // 10-99
+            const password = `${shopName}${year}${symbol}${randomNum}`;
+            
+            // Set the password field
+            const field = document.getElementById('password');
+            field.value = password;
+            field.type = 'text'; // Show the generated password
+            
+            // Update icon
+            const icon = document.getElementById('passwordIcon');
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+            
+            // Show notification
+            const originalPlaceholder = field.placeholder;
+            field.placeholder = '✓ Password generated! (Employee can change later)';
+            setTimeout(() => {
+                field.placeholder = originalPlaceholder;
+            }, 3000);
+        }
+
+        // Generate password for edit modal
+        function generatePasswordForEdit(button) {
+            const input = button.parentElement.querySelector('input');
+            const shopName = 'DeChavez';
+            const numbers = '0123456789';
+            const symbols = '!@#';
+            
+            let password = shopName;
+            for (let i = 0; i < 4; i++) {
+                password += numbers[Math.floor(Math.random() * numbers.length)];
+            }
+            password += symbols[Math.floor(Math.random() * symbols.length)];
+            
+            input.value = password;
+            input.type = 'text';
+            
+            setTimeout(() => {
+                input.type = 'password';
+            }, 2000);
         }
 
         // Form validation

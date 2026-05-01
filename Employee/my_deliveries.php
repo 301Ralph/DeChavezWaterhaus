@@ -17,32 +17,38 @@ $stmt->execute();
 $employee = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// Handle status update
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
+// Handle status update - Employee can only mark as Delivered
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['mark_delivered'])) {
     $orderID = intval($_POST['orderID']);
-    $newStatus = $_POST['status'];
     
-    $update = $conn->prepare("UPDATE orders SET status = ? WHERE orderID = ? AND assigned_employee = ?");
-    $update->bind_param("sii", $newStatus, $orderID, $userID);
+    $update = $conn->prepare("UPDATE orders SET status = 'Delivered' WHERE orderID = ?");
+    $update->bind_param("i", $orderID);
     $update->execute();
     $update->close();
     
-    echo '<script>alert("Order status updated!"); window.location = "my_deliveries.php";</script>';
+    echo '<script>alert("Order marked as Delivered!"); window.location = "my_deliveries.php";</script>';
     exit();
 }
 
-// Fetch assigned deliveries
+// Fetch assigned deliveries (from deliveries table - where assignments are stored)
 $deliveries = [];
 try {
     $result = $conn->query("
         SELECT o.*, 
                GROUP_CONCAT(CONCAT(p.ProductName, ' x', oi.quantity) SEPARATOR ', ') AS products,
-               c.Firstname AS customer_firstname, c.Lastname AS customer_lastname
+               GROUP_CONCAT(p.ImageURL SEPARATOR '|') AS product_images,
+               c.Firstname AS customer_firstname, c.Lastname AS customer_lastname,
+               c.Address AS customer_address,
+               c.Contact AS customer_contact,
+               da.full_address AS delivery_full_address,
+               da.contact_number AS delivery_contact
         FROM orders o
         LEFT JOIN order_items oi ON o.orderID = oi.orderID
         LEFT JOIN product p ON oi.productID = p.ProductID
         LEFT JOIN customers c ON o.userID = c.userID
-        WHERE o.assigned_employee = $userID
+        INNER JOIN deliveries d ON o.orderID = d.orderID
+        LEFT JOIN delivery_addresses da ON c.userID = da.userID AND da.is_default = 1
+        WHERE d.riderID = $userID
         GROUP BY o.orderID
         ORDER BY o.order_date DESC
     ");
@@ -53,7 +59,7 @@ try {
         }
     }
 } catch (Exception $e) {
-    // Table might not have assigned_employee column yet
+    // Tables might not exist yet
 }
 ?>
 
@@ -157,7 +163,8 @@ try {
                     <button class="btn btn-light position-relative" data-bs-toggle="dropdown" style="width: 42px; height: 42px; border-radius: 12px;">
                         <i class="fas fa-bell fa-lg"></i>
                         <?php 
-                        $unreadCount = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['count'] ?? 0;
+                        $unreadResult = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE userID = $userID AND is_read = 0");
+                        $unreadCount = $unreadResult ? ($unreadResult->fetch_assoc()['count'] ?: 0) : 0;
                         if ($unreadCount > 0): 
                         ?>
                             <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 9px; padding: 2px 6px;">
@@ -224,13 +231,40 @@ try {
                                     <small class="text-muted">#<?php echo $delivery['orderID']; ?></small>
                                 </div>
                                 
-                                <h6 class="fw-bold mb-2"><?php echo htmlspecialchars($delivery['products'] ?? 'Water Delivery'); ?></h6>
+                                <h6 class="fw-bold mb-2"><?php echo htmlspecialchars(isset($delivery['products']) && $delivery['products'] ? $delivery['products'] : 'Water Delivery'); ?></h6>
                                 
                                 <div class="mb-3">
+                                    <!-- Product Image -->
+                                    <?php 
+                                    $firstImage = '';
+                                    if (!empty($delivery['product_images'])) {
+                                        $images = explode('|', $delivery['product_images']);
+                                        $firstImage = isset($images[0]) ? $images[0] : '';
+                                    }
+                                    ?>
+                                    <?php if (!empty($firstImage) && file_exists('../' . $firstImage)): ?>
+                                        <div class="mb-2">
+                                            <img src="../<?php echo $firstImage; ?>" alt="Product" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px; border: 1px solid #e9ecef;">
+                                        </div>
+                                    <?php endif; ?>
+                                    
                                     <div class="d-flex align-items-center text-muted small mb-1">
                                         <i class="fas fa-user me-2"></i>
-                                        <span><?php echo htmlspecialchars(($delivery['customer_firstname'] ?? '') . ' ' . ($delivery['customer_lastname'] ?? '')); ?></span>
+                                        <span><?php echo htmlspecialchars((isset($delivery['customer_firstname']) ? $delivery['customer_firstname'] : '') . ' ' . (isset($delivery['customer_lastname']) ? $delivery['customer_lastname'] : '')); ?></span>
                                     </div>
+                                    <div class="d-flex align-items-center text-muted small mb-1">
+                                        <i class="fas fa-map-marker-alt me-2 text-danger"></i>
+                                        <span><?php echo htmlspecialchars(isset($delivery['delivery_full_address']) && $delivery['delivery_full_address'] ? $delivery['delivery_full_address'] : (isset($delivery['delivery_address']) && $delivery['delivery_address'] ? $delivery['delivery_address'] : 'No address provided')); ?></span>
+                                    </div>
+                                    <?php 
+                                    $contactToShow = isset($delivery['delivery_contact']) && $delivery['delivery_contact'] ? $delivery['delivery_contact'] : (isset($delivery['customer_contact']) && $delivery['customer_contact'] ? $delivery['customer_contact'] : '');
+                                    if (!empty($contactToShow)): 
+                                    ?>
+                                    <div class="d-flex align-items-center text-muted small mb-1">
+                                        <i class="fas fa-phone me-2"></i>
+                                        <span><?php echo htmlspecialchars($contactToShow); ?></span>
+                                    </div>
+                                    <?php endif; ?>
                                     <div class="d-flex align-items-center text-muted small mb-1">
                                         <i class="fas fa-calendar me-2"></i>
                                         <span><?php echo date('M j, Y g:i A', strtotime($delivery['order_date'])); ?></span>
@@ -241,20 +275,20 @@ try {
                                     </div>
                                 </div>
                                 
-                                <?php if ($delivery['status'] != 'Delivered'): ?>
-                                    <form method="POST" class="d-flex gap-2">
+                                <?php if ($delivery['status'] == 'Out for Delivery'): ?>
+                                    <form method="POST">
                                         <input type="hidden" name="orderID" value="<?php echo $delivery['orderID']; ?>">
-                                        <select name="status" class="form-select form-select-sm" required>
-                                            <option value="">Update Status...</option>
-                                            <option value="Processing" <?php echo $delivery['status'] == 'Processing' ? 'selected' : ''; ?>>Processing</option>
-                                            <option value="Out for Delivery" <?php echo $delivery['status'] == 'Out for Delivery' ? 'selected' : ''; ?>>Out for Delivery</option>
-                                            <option value="Delivered" <?php echo $delivery['status'] == 'Delivered' ? 'selected' : ''; ?>>Delivered</option>
-                                        </select>
-                                        <button type="submit" name="update_status" class="btn btn-primary btn-sm px-4">Update</button>
+                                        <button type="submit" name="mark_delivered" class="btn btn-success btn-sm w-100" onclick="return confirm('Mark this order as Delivered?')">
+                                            <i class="fas fa-check-circle me-1"></i> Mark as Delivered
+                                        </button>
                                     </form>
-                                <?php else: ?>
+                                <?php elseif ($delivery['status'] == 'Delivered'): ?>
                                     <div class="text-success small">
-                                        <i class="fas fa-check-circle me-1"></i> Completed on <?php echo date('M j, Y', strtotime($delivery['updated_at'] ?? $delivery['order_date'])); ?>
+                                        <i class="fas fa-check-circle me-1"></i> Completed on <?php echo date('M j, Y', strtotime(isset($delivery['updated_at']) && $delivery['updated_at'] ? $delivery['updated_at'] : $delivery['order_date'])); ?>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="text-muted small">
+                                        <i class="fas fa-info-circle me-1"></i> Waiting for owner to set "Out for Delivery"
                                     </div>
                                 <?php endif; ?>
                             </div>
