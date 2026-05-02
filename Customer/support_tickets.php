@@ -4,7 +4,7 @@ session_start();
 
 // Security check
 if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'customer') {
-    echo '<script>alert("Access denied. Customers only."); window.location = "../login.php";</script>';
+    header("Location: ../login.php");
     exit();
 }
 
@@ -18,6 +18,62 @@ $stmt->execute();
 $user = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
+// Handle flash messages
+$flashMessage = $_SESSION['flash_message'] ?? null;
+$flashType = $_SESSION['flash_type'] ?? 'info';
+if ($flashMessage) {
+    unset($_SESSION['flash_message']);
+    unset($_SESSION['flash_type']);
+}
+
+// Handle sending a follow-up message
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['send_message'])) {
+    $ticketID = intval($_POST['ticketID']);
+    $messageText = trim(htmlspecialchars($_POST['message']));
+
+    if (!empty($messageText)) {
+        // Verify ticket belongs to user
+        $verifyStmt = $conn->prepare("SELECT ticketID FROM support_tickets WHERE ticketID = ? AND userID = ?");
+        $verifyStmt->bind_param("ii", $ticketID, $userID);
+        $verifyStmt->execute();
+        $ticketExists = $verifyStmt->get_result()->num_rows > 0;
+        $verifyStmt->close();
+
+        if ($ticketExists) {
+            // Get current conversation
+            $ticketStmt = $conn->prepare("SELECT conversation FROM support_tickets WHERE ticketID = ?");
+            $ticketStmt->bind_param("i", $ticketID);
+            $ticketStmt->execute();
+            $ticketData = $ticketStmt->get_result()->fetch_assoc();
+            $ticketStmt->close();
+
+            $conversation = [];
+            if (!empty($ticketData['conversation'])) {
+                $conversation = json_decode($ticketData['conversation'], true) ?? [];
+            }
+
+            // Add customer message
+            $conversation[] = [
+                'sender' => 'customer',
+                'message' => $messageText,
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+
+            // Update ticket
+            $updateStmt = $conn->prepare("UPDATE support_tickets SET conversation = ?, last_reply_at = NOW() WHERE ticketID = ?");
+            $updateStmt->bind_param("si", json_encode($conversation), $ticketID);
+            $updateStmt->execute();
+            $updateStmt->close();
+
+            $_SESSION['flash_message'] = "Message sent successfully!";
+            $_SESSION['flash_type'] = "success";
+        }
+    }
+
+    header("Location: support_tickets.php" . (isset($_GET['ticket']) ? "?ticket=" . $_GET['ticket'] : ""));
+    exit();
+}
+
 // Handle new ticket submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_ticket'])) {
     $subject = htmlspecialchars($_POST['subject']);
@@ -29,16 +85,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_ticket'])) {
     $insertStmt->bind_param("issss", $userID, $subject, $category, $message, $priority);
     
     if ($insertStmt->execute()) {
-        echo '<script>alert("Ticket submitted successfully! We will respond soon."); window.location = "support_tickets.php";</script>';
-        exit();
+        $_SESSION['flash_message'] = "Ticket submitted successfully! We will respond soon.";
+        $_SESSION['flash_type'] = "success";
     } else {
-        echo '<script>alert("Failed to submit ticket. Please try again.");</script>';
+        $_SESSION['flash_message'] = "Failed to submit ticket. Please try again.";
+        $_SESSION['flash_type'] = "error";
     }
     $insertStmt->close();
+
+    header("Location: support_tickets.php");
+    exit();
 }
 
-// Fetch user's tickets with statistics
-$tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID ORDER BY created_at DESC");
+// Fetch user's tickets
+$tickets = $conn->query("SELECT * FROM support_tickets WHERE userID = $userID ORDER BY COALESCE(last_reply_at, created_at) DESC");
 
 // Get ticket statistics
 $statsQuery = $conn->query("
@@ -52,6 +112,22 @@ $statsQuery = $conn->query("
     WHERE userID = $userID
 ");
 $stats = $statsQuery->fetch_assoc();
+
+// Get selected ticket if viewing chat
+$selectedTicket = null;
+$conversation = [];
+if (isset($_GET['ticket'])) {
+    $selectedID = intval($_GET['ticket']);
+    $selStmt = $conn->prepare("SELECT * FROM support_tickets WHERE ticketID = ? AND userID = ?");
+    $selStmt->bind_param("ii", $selectedID, $userID);
+    $selStmt->execute();
+    $selectedTicket = $selStmt->get_result()->fetch_assoc();
+    $selStmt->close();
+
+    if ($selectedTicket && !empty($selectedTicket['conversation'])) {
+        $conversation = json_decode($selectedTicket['conversation'], true) ?? [];
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -59,63 +135,167 @@ $stats = $statsQuery->fetch_assoc();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Support Tickets • De Chavez Waterhaus</title>
+    <title>Support Center • De Chavez Waterhaus</title>
     <link rel="icon" href="../images/logo.jpg" type="image/jpeg">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
     <style>
         :root { --primary: #0077B6; --primary-dark: #023E8A; }
-        body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
+        body { font-family: 'Poppins', sans-serif; background-color: #f0f2f5; }
         
         .sidebar { 
             position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
             background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
             transition: all 0.3s ease; 
+            display: flex;
+            flex-direction: column;
         }
-        .sidebar.collapsed { width: 80px; }
         .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
         .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
         .sidebar .nav-link { 
             color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; 
             font-weight: 500; transition: all 0.3s ease; border-radius: 12px; margin: 4px 10px;
         }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { 
-            background-color: #f0f7ff; color: var(--primary); 
-        }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background-color: #f0f7ff; color: var(--primary); }
         .sidebar .nav-link i { width: 22px; font-size: 1.1rem; }
         
-        .main-content { margin-left: 260px; padding: 30px; transition: margin-left 0.3s ease; }
-        .sidebar.collapsed ~ .main-content { margin-left: 80px; }
+        .main-content { margin-left: 260px; padding: 20px; transition: margin-left 0.3s ease; }
         
-        .ticket-card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
-        .status-open { background: #d4edda; color: #155724; }
-        .status-in-progress { background: #fff3cd; color: #856404; }
-        .status-resolved { background: #cce5ff; color: #004085; }
-        .status-closed { background: #e2e3e5; color: #383d41; }
-
-        .sidebar .nav-link {
-            padding: 12px 18px;
-            margin: 2px 8px;
-            border-radius: 10px;
-        }
-        .sidebar::-webkit-scrollbar {
-            width: 6px;
-        }
-        .sidebar::-webkit-scrollbar-thumb {
-            background: #ccc;
-            border-radius: 3px;
-        }
-
-        /* Mobile Responsive */
         @media (max-width: 991.98px) {
-            .main-content { margin-left: 0; padding: 20px; }
+            .main-content { margin-left: 0; padding: 15px; }
             .sidebar { transform: translateX(-100%); }
             .sidebar.show { transform: translateX(0); }
         }
+
+        /* Messenger Styles */
+        .messenger-container {
+            display: flex;
+            height: calc(100vh - 100px);
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
         
-        @media (max-width: 576px) {
-            .main-content { padding: 15px; }
+        .ticket-list {
+            width: 320px;
+            border-right: 1px solid #e9ecef;
+            overflow-y: auto;
+        }
+        
+        .ticket-list-header {
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+            background: #f8f9fa;
+        }
+        
+        .ticket-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .ticket-item:hover { background: #f8f9fa; }
+        .ticket-item.active { background: #e8f4ff; border-left: 4px solid #0077B6; }
+        
+        .ticket-item .ticket-subject { font-size: 0.9rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ticket-item .ticket-time { font-size: 0.75rem; color: #94a3b8; }
+        
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #f8f9fa;
+        }
+        
+        .chat-header {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f0f2f5;
+        }
+        
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 18px;
+            border-radius: 18px;
+            margin-bottom: 12px;
+            position: relative;
+        }
+        
+        .message-bubble.customer {
+            background: #0077B6;
+            color: white;
+            border-bottom-right-radius: 4px;
+            margin-left: auto;
+        }
+        
+        .message-bubble.admin {
+            background: white;
+            border-bottom-left-radius: 4px;
+            margin-right: auto;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        .message-time {
+            font-size: 0.7rem;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+        
+        .chat-input-area {
+            padding: 15px 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .message-input {
+            border-radius: 25px;
+            border: 1px solid #dee2e6;
+            padding: 12px 20px;
+            resize: none;
+        }
+        
+        .empty-chat {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            flex-direction: column;
+            color: #94a3b8;
+        }
+        
+        .empty-chat i { font-size: 4rem; margin-bottom: 20px; opacity: 0.5; }
+        
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0077B6;
+        }
+        
+        .stat-label {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-top: 5px;
         }
     </style>
 </head>
@@ -124,10 +304,12 @@ $stats = $statsQuery->fetch_assoc();
     <div class="sidebar" id="sidebar">
         <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
             <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
-            <span class="fw-bold fs-5">De Chavez Waterhaus</span>
+            <div>
+                <span class="fw-bold fs-5">De Chavez Waterhaus</span>
+                <small class="d-block text-muted">Customer Portal</small>
+            </div>
         </div>
         
-        <!-- Scrollable Menu -->
         <div class="px-3 mt-2" style="height: calc(100vh - 90px); overflow-y: auto; padding-bottom: 20px;">
             <ul class="nav flex-column">
                 <li class="nav-item"><a href="customer_dashboard.php" class="nav-link"><i class="fas fa-home me-3"></i> <span>Dashboard</span></a></li>
@@ -147,18 +329,20 @@ $stats = $statsQuery->fetch_assoc();
 
     <!-- Main Content -->
     <div class="main-content">
-        <!-- IMPROVED MOBILE NAVBAR -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div class="d-flex align-items-center">
-                <!-- Hamburger Button -->
-                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
-                    <i class="fas fa-bars"></i>
-                </button>
-                
-                <div>
-                    <h4 class="fw-bold mb-0">Support Tickets</h4>
-                    <p class="text-muted mb-0 d-none d-sm-block">Get help from our support team</p>
-                </div>
+        <!-- Flash Alert -->
+        <?php if ($flashMessage): ?>
+        <div class="alert alert-<?php echo $flashType === 'success' ? 'success' : ($flashType === 'error' ? 'danger' : 'info'); ?> alert-dismissible fade show mb-3" role="alert" style="border-radius: 12px;">
+            <i class="fas fa-<?php echo $flashType === 'success' ? 'check-circle' : 'info-circle'; ?> me-2"></i>
+            <?php echo htmlspecialchars($flashMessage); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
+
+        <!-- Top Navbar -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h4 class="fw-bold mb-0">Support Center</h4>
+                <p class="text-muted mb-0 small">Get help from our support team</p>
             </div>
             
             <div class="d-flex align-items-center gap-3">
@@ -191,7 +375,7 @@ $stats = $statsQuery->fetch_assoc();
         </div>
 
         <!-- Statistics Cards -->
-        <div class="row g-3 mb-4">
+        <div class="row g-3 mb-3">
             <div class="col-6 col-md-3">
                 <div class="stat-card">
                     <div class="stat-number"><?php echo $stats['total']; ?></div>
@@ -218,90 +402,112 @@ $stats = $statsQuery->fetch_assoc();
             </div>
         </div>
 
-        <!-- Tickets List -->
-        <div class="ticket-card p-4">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h5 class="fw-bold mb-0">Your Tickets</h5>
+        <!-- Messenger Interface -->
+        <div class="messenger-container">
+            <!-- Ticket List -->
+            <div class="ticket-list">
+                <div class="ticket-list-header">
+                    <h6 class="fw-bold mb-1"><i class="fas fa-inbox me-2"></i> My Tickets</h6>
+                    <small class="text-muted"><?php echo $tickets->num_rows; ?> tickets</small>
+                </div>
+                
                 <?php if ($tickets->num_rows > 0): ?>
-                    <span class="badge bg-primary"><?php echo $tickets->num_rows; ?> Total</span>
+                    <?php 
+                    $tickets->data_seek(0);
+                    while ($ticket = $tickets->fetch_assoc()): 
+                        $isActive = $selectedTicket && $selectedTicket['ticketID'] == $ticket['ticketID'];
+                        $lastMsg = !empty($ticket['conversation']) ? json_decode($ticket['conversation'], true) : [];
+                        $lastMsgText = !empty($lastMsg) ? end($lastMsg)['message'] : $ticket['message'];
+                        $lastMsgTime = !empty($ticket['last_reply_at']) ? $ticket['last_reply_at'] : $ticket['created_at'];
+                    ?>
+                    <a href="?ticket=<?php echo $ticket['ticketID']; ?>" class="d-block text-decoration-none ticket-item <?php echo $isActive ? 'active' : ''; ?>">
+                        <div class="d-flex align-items-start">
+                            <div class="flex-grow-1 min-w-0">
+                                <div class="d-flex justify-content-between align-items-start mb-1">
+                                    <div class="fw-semibold text-dark"><?php echo htmlspecialchars(substr($ticket['subject'], 0, 25)); ?>...</div>
+                                    <div class="ticket-time"><?php echo date('g:i A', strtotime($lastMsgTime)); ?></div>
+                                </div>
+                                <div class="ticket-subject mb-1"><?php echo htmlspecialchars(substr($lastMsgText, 0, 40)); ?>...</div>
+                                <div>
+                                    <span class="badge bg-<?php echo $ticket['status'] == 'Open' ? 'warning' : ($ticket['status'] == 'In Progress' ? 'info' : ($ticket['status'] == 'Resolved' ? 'success' : 'secondary')); ?> small">
+                                        <?php echo $ticket['status']; ?>
+                                    </span>
+                                    <span class="badge bg-<?php echo $ticket['priority'] == 'High' ? 'danger' : ($ticket['priority'] == 'Medium' ? 'warning' : 'info'); ?> small ms-1">
+                                        <?php echo $ticket['priority']; ?>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </a>
+                    <?php endwhile; ?>
+                <?php else: ?>
+                    <div class="p-4 text-center text-muted">
+                        <i class="fas fa-inbox fa-3x mb-3 opacity-50"></i>
+                        <p>No tickets yet</p>
+                    </div>
                 <?php endif; ?>
             </div>
-            
-            <?php if ($tickets->num_rows > 0): ?>
-                <div class="table-responsive">
-                    <table class="table align-middle">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Ticket ID</th>
-                                <th>Subject</th>
-                                <th>Category</th>
-                                <th>Priority</th>
-                                <th>Status</th>
-                                <th>Date</th>
-                                <th class="text-end">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php 
-                            // Reset the result pointer
-                            $tickets->data_seek(0);
-                            while ($ticket = $tickets->fetch_assoc()) { 
-                                $priorityClass = 'priority-medium';
-                                if ($ticket['priority'] == 'Low') $priorityClass = 'priority-low';
-                                if ($ticket['priority'] == 'High') $priorityClass = 'priority-high';
-                                
-                                $statusClass = 'status-open';
-                                if ($ticket['status'] == 'In Progress') $statusClass = 'status-in-progress';
-                                if ($ticket['status'] == 'Resolved') $statusClass = 'status-resolved';
-                                if ($ticket['status'] == 'Closed') $statusClass = 'status-closed';
-                            ?>
-                                <tr>
-                                    <td><strong>#<?php echo $ticket['ticketID']; ?></strong></td>
-                                    <td>
-                                        <div class="fw-semibold"><?php echo htmlspecialchars($ticket['subject']); ?></div>
-                                        <small class="text-muted"><?php echo substr(htmlspecialchars($ticket['message']), 0, 50) . '...'; ?></small>
-                                    </td>
-                                    <td><span class="badge bg-secondary"><?php echo $ticket['category']; ?></span></td>
-                                    <td><span class="badge <?php echo $priorityClass; ?>"><?php echo $ticket['priority']; ?></span></td>
-                                    <td>
-                                        <span class="badge <?php echo $statusClass; ?>">
-                                            <?php echo $ticket['status']; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div><?php echo date('M j, Y', strtotime($ticket['created_at'])); ?></div>
-                                        <small class="text-muted"><?php echo date('g:i A', strtotime($ticket['created_at'])); ?></small>
-                                    </td>
-                                    <td class="text-end">
-                                        <button class="btn btn-sm btn-outline-primary px-3 rounded-pill" 
-                                                data-bs-toggle="modal" 
-                                                data-bs-target="#viewTicketModal"
-                                                data-ticketid="<?php echo $ticket['ticketID']; ?>"
-                                                data-subject="<?php echo htmlspecialchars($ticket['subject']); ?>"
-                                                data-category="<?php echo $ticket['category']; ?>"
-                                                data-priority="<?php echo $ticket['priority']; ?>"
-                                                data-status="<?php echo $ticket['status']; ?>"
-                                                data-message="<?php echo htmlspecialchars($ticket['message']); ?>"
-                                                data-created="<?php echo date('F j, Y g:i A', strtotime($ticket['created_at'])); ?>"
-                                                data-updated="<?php echo date('F j, Y g:i A', strtotime($ticket['updated_at'])); ?>">
-                                            <i class="fas fa-eye me-1"></i> View
-                                        </button>
-                                    </td>
-                                </tr>
-                            <?php } ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php else: ?>
-                <div class="text-center py-5">
-                    <i class="fas fa-headset fa-4x text-muted mb-4"></i>
-                    <h5 class="fw-bold">No Support Tickets Yet</h5>
-                    <p class="text-muted">Submit a ticket if you need help with orders, deliveries, or account issues.</p>
-                    <button class="btn btn-primary px-5 rounded-pill" data-bs-toggle="modal" data-bs-target="#newTicketModal">
-                        <i class="fas fa-plus me-2"></i> Submit New Ticket
-                    </button>
-                </div>
-            <?php endif; ?>
+
+            <!-- Chat Area -->
+            <div class="chat-area">
+                <?php if ($selectedTicket): ?>
+                    <!-- Chat Header -->
+                    <div class="chat-header">
+                        <div>
+                            <div class="fw-bold"><?php echo htmlspecialchars($selectedTicket['subject']); ?></div>
+                            <small class="text-muted">Ticket #<?php echo $selectedTicket['ticketID']; ?> • <?php echo $selectedTicket['category']; ?></small>
+                        </div>
+                        <div>
+                            <span class="badge bg-<?php echo $selectedTicket['status'] == 'Open' ? 'warning' : ($selectedTicket['status'] == 'In Progress' ? 'info' : ($selectedTicket['status'] == 'Resolved' ? 'success' : 'secondary')); ?> px-3 py-2">
+                                <?php echo $selectedTicket['status']; ?>
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Messages -->
+                    <div class="chat-messages" id="chatMessages">
+                        <!-- Original ticket message -->
+                        <div class="message-bubble admin">
+                            <div class="fw-semibold small mb-1">You (Original Request)</div>
+                            <?php echo nl2br(htmlspecialchars($selectedTicket['message'])); ?>
+                            <div class="message-time"><?php echo date('M j, g:i A', strtotime($selectedTicket['created_at'])); ?></div>
+                        </div>
+
+                        <!-- Conversation messages -->
+                        <?php foreach ($conversation as $msg): ?>
+                            <div class="message-bubble <?php echo $msg['sender'] === 'customer' ? 'customer' : 'admin'; ?>">
+                                <?php echo nl2br(htmlspecialchars($msg['message'])); ?>
+                                <div class="message-time"><?php echo date('M j, g:i A', strtotime($msg['timestamp'])); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <!-- Input Area -->
+                    <div class="chat-input-area">
+                        <form method="POST" class="d-flex gap-2">
+                            <input type="hidden" name="ticketID" value="<?php echo $selectedTicket['ticketID']; ?>">
+                            
+                            <div class="flex-grow-1">
+                                <textarea name="message" class="form-control message-input" rows="1" placeholder="Type your message..." required></textarea>
+                            </div>
+                            
+                            <button type="submit" name="send_message" class="btn btn-primary px-4">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </form>
+                    </div>
+                <?php else: ?>
+                    <!-- Empty State -->
+                    <div class="empty-chat">
+                        <i class="fas fa-comments"></i>
+                        <h5 class="fw-bold mt-3">Select a Ticket</h5>
+                        <p class="text-muted">Choose a ticket from the list to view the conversation</p>
+                        <button class="btn btn-primary mt-3" data-bs-toggle="modal" data-bs-target="#newTicketModal">
+                            <i class="fas fa-plus me-2"></i> Create New Ticket
+                        </button>
+                    </div>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 
@@ -357,72 +563,6 @@ $stats = $statsQuery->fetch_assoc();
         </div>
     </div>
 
-    <!-- View Ticket Modal -->
-    <div class="modal fade" id="viewTicketModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title fw-bold">
-                        <i class="fas fa-ticket-alt me-2"></i> Ticket Details
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body p-4">
-                    <div class="row g-3">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <div>
-                                    <div class="text-muted small">Ticket ID</div>
-                                    <div class="fw-bold fs-4" id="modalTicketID"></div>
-                                </div>
-                                <div class="text-end">
-                                    <span class="badge" id="modalStatus"></span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <div class="text-muted small">Subject</div>
-                            <div class="fw-semibold" id="modalSubject"></div>
-                        </div>
-                        
-                        <div class="col-md-3">
-                            <div class="text-muted small">Category</div>
-                            <div><span class="badge bg-secondary" id="modalCategory"></span></div>
-                        </div>
-                        
-                        <div class="col-md-3">
-                            <div class="text-muted small">Priority</div>
-                            <div><span class="badge" id="modalPriority"></span></div>
-                        </div>
-                        
-                        <div class="col-12">
-                            <div class="text-muted small">Message</div>
-                            <div class="p-3 bg-light rounded" id="modalMessage" style="white-space: pre-wrap;"></div>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <div class="text-muted small">Created</div>
-                            <div class="fw-semibold" id="modalCreated"></div>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <div class="text-muted small">Last Updated</div>
-                            <div class="fw-semibold" id="modalUpdated"></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer border-0 p-4 pt-0">
-                    <div class="alert alert-info py-2 px-3 mb-0 w-100">
-                        <i class="fas fa-info-circle me-2"></i>
-                        <small>Our support team will respond within 24 hours. You will receive an email notification when your ticket is updated.</small>
-                    </div>
-                    <button type="button" class="btn btn-light px-4" data-bs-dismiss="modal">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Mobile Sidebar Toggle
@@ -430,9 +570,7 @@ $stats = $statsQuery->fetch_assoc();
         const mobileToggle = document.getElementById('mobileToggle');
         
         if (mobileToggle) {
-            mobileToggle.addEventListener('click', () => {
-                sidebar.classList.toggle('show');
-            });
+            mobileToggle.addEventListener('click', () => sidebar.classList.toggle('show'));
             
             document.addEventListener('click', function(e) {
                 if (window.innerWidth < 992 && !sidebar.contains(e.target) && !mobileToggle.contains(e.target)) {
@@ -440,47 +578,21 @@ $stats = $statsQuery->fetch_assoc();
                 }
             });
         }
-        
-        // View Ticket Modal - Populate with data
-        const viewTicketModal = document.getElementById('viewTicketModal');
-        viewTicketModal.addEventListener('show.bs.modal', function (event) {
-            const button = event.relatedTarget;
-            
-            // Get data from button attributes
-            const ticketID = button.getAttribute('data-ticketid');
-            const subject = button.getAttribute('data-subject');
-            const category = button.getAttribute('data-category');
-            const priority = button.getAttribute('data-priority');
-            const status = button.getAttribute('data-status');
-            const message = button.getAttribute('data-message');
-            const created = button.getAttribute('data-created');
-            const updated = button.getAttribute('data-updated');
-            
-            // Populate modal fields
-            document.getElementById('modalTicketID').innerHTML = '#' + ticketID;
-            document.getElementById('modalSubject').innerHTML = subject;
-            document.getElementById('modalCategory').innerHTML = category;
-            document.getElementById('modalPriority').innerHTML = priority;
-            document.getElementById('modalStatus').innerHTML = status;
-            document.getElementById('modalMessage').innerHTML = message;
-            document.getElementById('modalCreated').innerHTML = created;
-            document.getElementById('modalUpdated').innerHTML = updated;
-            
-            // Set priority badge color
-            const priorityBadge = document.getElementById('modalPriority');
-            priorityBadge.className = 'badge';
-            if (priority === 'Low') priorityBadge.classList.add('bg-info');
-            else if (priority === 'Medium') priorityBadge.classList.add('bg-warning');
-            else if (priority === 'High') priorityBadge.classList.add('bg-danger');
-            
-            // Set status badge color
-            const statusBadge = document.getElementById('modalStatus');
-            statusBadge.className = 'badge';
-            if (status === 'Open') statusBadge.classList.add('bg-success');
-            else if (status === 'In Progress') statusBadge.classList.add('bg-warning');
-            else if (status === 'Resolved') statusBadge.classList.add('bg-primary');
-            else if (status === 'Closed') statusBadge.classList.add('bg-secondary');
-        });
+
+        // Auto-scroll chat to bottom
+        const chatMessages = document.getElementById('chatMessages');
+        if (chatMessages) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Auto-resize textarea
+        const textarea = document.querySelector('.message-input');
+        if (textarea) {
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+            });
+        }
     </script>
 </body>
 </html>
