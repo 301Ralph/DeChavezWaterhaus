@@ -210,7 +210,8 @@ $customers = $conn->query("SELECT * FROM customers WHERE Role = 'customer' ORDER
                                 <th>Email</th>
                                 <th>Phone</th>
                                 <th>Address</th>
-                                <th>Status</th>
+                                <th>Account Status</th>
+                                <th>Email</th>
                                 <th>Joined</th>
                                 <th class="text-end pe-4">Actions</th>
                             </tr>
@@ -227,20 +228,40 @@ $customers = $conn->query("SELECT * FROM customers WHERE Role = 'customer' ORDER
                                         <td class="small text-muted"><?php echo substr(htmlspecialchars($cust['Address'] ?? 'N/A'), 0, 40); ?>...</td>
                                         <td>
                                             <?php if ($cust['verification_status'] == 'approved'): ?>
-                                                <span class="badge bg-success px-3 py-2">Verified</span>
+                                                <span class="badge bg-success px-3 py-2"><i class="fas fa-check me-1"></i> Verified</span>
                                             <?php elseif ($cust['verification_status'] == 'pending'): ?>
-                                                <span class="badge bg-warning text-dark px-3 py-2">Pending</span>
+                                                <span class="badge bg-warning text-dark px-3 py-2"><i class="fas fa-clock me-1"></i> Pending</span>
                                             <?php else: ?>
-                                                <span class="badge bg-secondary px-3 py-2">Not Verified</span>
+                                                <span class="badge bg-secondary px-3 py-2"><i class="fas fa-times me-1"></i> Not Verified</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php if ($cust['email_verified'] == 1): ?>
+                                                <span class="badge bg-success px-2 py-1"><i class="fas fa-envelope me-1"></i> Verified</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-warning text-dark px-2 py-1"><i class="fas fa-envelope me-1"></i> Unverified</span>
                                             <?php endif; ?>
                                         </td>
                                         <td class="small text-muted"><?php echo date('M j, Y', strtotime($cust['created_at'])); ?></td>
                                         <td class="text-end pe-4">
                                             <?php if ($cust['verification_status'] == 'pending'): ?>
-                                                <a href="manage_users.php?approve=<?php echo $cust['userID']; ?>" class="btn btn-sm btn-success">Approve</a>
-                                                <a href="manage_users.php?reject=<?php echo $cust['userID']; ?>" class="btn btn-sm btn-outline-danger">Reject</a>
+                                                <div class="btn-group btn-group-sm" role="group">
+                                                    <?php if (!empty($cust['VerificationFile'])): ?>
+                                                        <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#viewProofModal<?php echo $cust['userID']; ?>" title="View ID Proof">
+                                                            <i class="fas fa-file-alt"></i>
+                                                        </button>
+                                                    <?php endif; ?>
+                                                    <a href="manage_users.php?approve=<?php echo $cust['userID']; ?>" class="btn btn-success" title="Approve" onclick="return confirm('Approve this account?')">
+                                                        <i class="fas fa-check"></i>
+                                                    </a>
+                                                    <a href="manage_users.php?reject=<?php echo $cust['userID']; ?>" class="btn btn-danger" title="Reject" onclick="return confirm('Reject this account?')">
+                                                        <i class="fas fa-times"></i>
+                                                    </a>
+                                                </div>
                                             <?php else: ?>
-                                                <button class="btn btn-sm btn-outline-primary" disabled>View</button>
+                                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#viewUserModal<?php echo $cust['userID']; ?>">
+                                                    <i class="fas fa-eye me-1"></i> View Details
+                                                </button>
                                             <?php endif; ?>
                                         </td>
                                     </tr>
@@ -256,6 +277,177 @@ $customers = $conn->query("SELECT * FROM customers WHERE Role = 'customer' ORDER
             </div>
         </div>
     </div>
+
+    <!-- View User Modals -->
+    <?php 
+    // Reset customers result pointer
+    $customers->data_seek(0);
+    while ($cust = $customers->fetch_assoc()) { 
+    ?>
+    <div class="modal fade" id="viewUserModal<?php echo $cust['userID']; ?>" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Customer Details - <?php echo htmlspecialchars($cust['Firstname'] . ' ' . $cust['Lastname']); ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">FULL NAME</label>
+                                <div class="fw-bold"><?php echo htmlspecialchars($cust['Firstname'] . ' ' . $cust['Lastname']); ?></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">EMAIL ADDRESS</label>
+                                <div><?php echo htmlspecialchars($cust['Email']); ?></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">PHONE NUMBER</label>
+                                <div><?php echo htmlspecialchars($cust['Contact'] ?? 'Not provided'); ?></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">ACCOUNT STATUS</label>
+                                <div>
+                                    <?php if ($cust['verification_status'] == 'approved'): ?>
+                                        <span class="badge bg-success px-3 py-2">Verified</span>
+                                    <?php elseif ($cust['verification_status'] == 'pending'): ?>
+                                        <span class="badge bg-warning text-dark px-3 py-2">Pending Verification</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary px-3 py-2">Not Verified</span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">REGISTRATION DATE</label>
+                                <div><?php echo date('F j, Y g:i A', strtotime($cust['created_at'])); ?></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">DELIVERY ADDRESS</label>
+                                <div class="p-2 bg-light rounded"><?php echo htmlspecialchars($cust['Address'] ?? 'No address provided'); ?></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">2FA STATUS</label>
+                                <div>
+                                    <?php if ($cust['two_factor_enabled']): ?>
+                                        <span class="badge bg-success">Enabled</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">Disabled</span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-muted small">EMAIL VERIFIED</label>
+                                <div>
+                                    <?php if ($cust['email_verified']): ?>
+                                        <span class="badge bg-success">Yes</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning text-dark">No</span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <?php if (!empty($cust['VerificationFile'])): ?>
+                    <div class="mt-3 pt-3 border-top">
+                        <label class="form-label fw-semibold text-muted small">VERIFICATION DOCUMENT</label>
+                        <div>
+                            <?php if (file_exists('../' . $cust['VerificationFile'])): ?>
+                                <a href="../<?php echo htmlspecialchars($cust['VerificationFile']); ?>" target="_blank" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-file-download me-1"></i> View Verification File
+                                </a>
+                            <?php else: ?>
+                                <span class="text-muted small">File not found</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer border-0 p-4 pt-0">
+                    <button type="button" class="btn btn-light px-4" data-bs-dismiss="modal">Close</button>
+                    <?php if ($cust['verification_status'] == 'pending'): ?>
+                        <a href="manage_users.php?approve=<?php echo $cust['userID']; ?>" class="btn btn-success px-4">Approve</a>
+                        <a href="manage_users.php?reject=<?php echo $cust['userID']; ?>" class="btn btn-outline-danger px-4">Reject</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php } ?>
+
+    <!-- View Proof Modals for Pending Users -->
+    <?php 
+    // Reset customers result pointer for proof modals
+    $customers->data_seek(0);
+    while ($cust = $customers->fetch_assoc()) { 
+        if ($cust['verification_status'] == 'pending' && !empty($cust['VerificationFile'])) {
+    ?>
+    <div class="modal fade" id="viewProofModal<?php echo $cust['userID']; ?>" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">
+                        <i class="fas fa-file-alt me-2"></i> Verification Proof - <?php echo htmlspecialchars($cust['Firstname'] . ' ' . $cust['Lastname']); ?>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <?php 
+                    $filePath = '../' . $cust['VerificationFile'];
+                    $fileExt = strtolower(pathinfo($cust['VerificationFile'], PATHINFO_EXTENSION));
+                    ?>
+                    
+                    <?php if (file_exists($filePath)): ?>
+                        <?php if (in_array($fileExt, ['jpg', 'jpeg', 'png'])): ?>
+                            <!-- Image Preview -->
+                            <img src="<?php echo htmlspecialchars($filePath); ?>" class="img-fluid rounded shadow-sm" style="max-height: 500px;" alt="ID Proof">
+                        <?php elseif ($fileExt == 'pdf'): ?>
+                            <!-- PDF Preview -->
+                            <div class="alert alert-info">
+                                <i class="fas fa-file-pdf fa-3x mb-3"></i>
+                                <p>PDF Document</p>
+                                <a href="<?php echo htmlspecialchars($filePath); ?>" target="_blank" class="btn btn-primary">
+                                    <i class="fas fa-external-link-alt me-1"></i> Open PDF in New Tab
+                                </a>
+                            </div>
+                        <?php else: ?>
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                Unsupported file format
+                            </div>
+                        <?php endif; ?>
+                        
+                        <div class="mt-3">
+                            <a href="<?php echo htmlspecialchars($filePath); ?>" download class="btn btn-outline-primary btn-sm">
+                                <i class="fas fa-download me-1"></i> Download File
+                            </a>
+                        </div>
+                    <?php else: ?>
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                            File not found: <?php echo htmlspecialchars($cust['VerificationFile']); ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer border-0 p-4 pt-0">
+                    <button type="button" class="btn btn-light px-4" data-bs-dismiss="modal">Close</button>
+                    <a href="manage_users.php?approve=<?php echo $cust['userID']; ?>" class="btn btn-success px-4" onclick="return confirm('Approve this verification?')">
+                        <i class="fas fa-check me-1"></i> Approve
+                    </a>
+                    <a href="manage_users.php?reject=<?php echo $cust['userID']; ?>" class="btn btn-outline-danger px-4" onclick="return confirm('Reject this verification?')">
+                        <i class="fas fa-times me-1"></i> Reject
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php 
+        }
+    } 
+    ?>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
