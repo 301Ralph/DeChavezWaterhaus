@@ -47,10 +47,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['send_message'])) {
             'timestamp' => date('Y-m-d H:i:s')
         ];
 
+        // Add automated closing message if status is being set to Closed
+        if ($newStatus === 'Closed') {
+            $conversation[] = [
+                'sender' => 'system',
+                'message' => 'This conversation has been closed. Thank you for contacting De Chavez Waterhaus Support. If you have any further questions, please feel free to open a new ticket.',
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+        }
+
         // Update ticket with new conversation
         $updateStmt = $conn->prepare("UPDATE support_tickets SET conversation = ?, status = COALESCE(?, status), last_reply_at = NOW() WHERE ticketID = ?");
         $statusToSet = $newStatus ?: null;
-        $updateStmt->bind_param("ssi", json_encode($conversation), $statusToSet, $ticketID);
+        $conversationJson = json_encode($conversation);
+        $updateStmt->bind_param("ssi", $conversationJson, $statusToSet, $ticketID);
         $updateStmt->execute();
         $updateStmt->close();
 
@@ -429,6 +439,7 @@ if (isset($_GET['ticket'])) {
                     </div>
 
                     <!-- Input Area -->
+                    <?php if ($selectedTicket['status'] !== 'Closed'): ?>
                     <div class="chat-input-area">
                         <form method="POST" class="d-flex gap-2">
                             <input type="hidden" name="ticketID" value="<?php echo $selectedTicket['ticketID']; ?>">
@@ -451,6 +462,14 @@ if (isset($_GET['ticket'])) {
                             </button>
                         </form>
                     </div>
+                    <?php else: ?>
+                    <div class="chat-input-area">
+                        <div class="alert alert-secondary py-2 px-3 mb-0 text-center">
+                            <i class="fas fa-lock me-2"></i>
+                            <strong>This conversation is closed.</strong> No further messages can be sent.
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 <?php else: ?>
                     <!-- Empty State -->
                     <div class="empty-chat">

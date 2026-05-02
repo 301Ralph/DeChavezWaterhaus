@@ -61,7 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['send_message'])) {
 
             // Update ticket
             $updateStmt = $conn->prepare("UPDATE support_tickets SET conversation = ?, last_reply_at = NOW() WHERE ticketID = ?");
-            $updateStmt->bind_param("si", json_encode($conversation), $ticketID);
+            $conversationJson = json_encode($conversation);
+            $updateStmt->bind_param("si", $conversationJson, $ticketID);
             $updateStmt->execute();
             $updateStmt->close();
 
@@ -85,6 +86,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_ticket'])) {
     $insertStmt->bind_param("issss", $userID, $subject, $category, $message, $priority);
     
     if ($insertStmt->execute()) {
+        $newTicketID = $conn->insert_id;
+        
+        // Add automated welcome message
+        $welcomeMsg = [
+            [
+                'sender' => 'system',
+                'message' => 'Thank you for contacting De Chavez Waterhaus Support! Your ticket has been received and our team will respond within 24 hours. Ticket #' . $newTicketID,
+                'timestamp' => date('Y-m-d H:i:s')
+            ]
+        ];
+        
+        $updateStmt = $conn->prepare("UPDATE support_tickets SET conversation = ? WHERE ticketID = ?");
+        $welcomeMsgJson = json_encode($welcomeMsg);
+        $updateStmt->bind_param("si", $welcomeMsgJson, $newTicketID);
+        $updateStmt->execute();
+        $updateStmt->close();
+        
         $_SESSION['flash_message'] = "Ticket submitted successfully! We will respond soon.";
         $_SESSION['flash_type'] = "success";
     } else {
@@ -483,6 +501,7 @@ if (isset($_GET['ticket'])) {
                     </div>
 
                     <!-- Input Area -->
+                    <?php if ($selectedTicket['status'] !== 'Closed'): ?>
                     <div class="chat-input-area">
                         <form method="POST" class="d-flex gap-2">
                             <input type="hidden" name="ticketID" value="<?php echo $selectedTicket['ticketID']; ?>">
@@ -496,6 +515,14 @@ if (isset($_GET['ticket'])) {
                             </button>
                         </form>
                     </div>
+                    <?php else: ?>
+                    <div class="chat-input-area">
+                        <div class="alert alert-secondary py-2 px-3 mb-0 text-center">
+                            <i class="fas fa-lock me-2"></i>
+                            <strong>This conversation is closed.</strong> Thank you for contacting us!
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 <?php else: ?>
                     <!-- Empty State -->
                     <div class="empty-chat">
