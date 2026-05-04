@@ -2,6 +2,11 @@
 include '../includes/connection.php';
 session_start();
 
+// Include Brevo config
+if (file_exists('../config.php')) {
+    include '../config.php';
+}
+
 if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'admin') {
     echo '<script>alert("Access denied. Admins only."); window.location = "../login.php";</script>';
     exit();
@@ -19,20 +24,93 @@ if (!is_dir($uploadDir)) {
 // Fetch admin data
 $admin = $conn->query("SELECT * FROM customers WHERE userID = $adminID")->fetch_assoc();
 
-// Handle Profile Update
+// ==================== HANDLE SEND VERIFICATION CODE (for login email) ====================
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['send_verification'])) {
+    $loginEmail = trim($admin['Email'] ?? '');
+    
+    if (empty($loginEmail)) {
+        echo '<script>alert("No email found on your account."); window.location = "profile.php";</script>';
+        exit();
+    }
+    
+    // Generate 6-digit OTP (same as forgot_password.php)
+    $otp = rand(100000, 999999);
+    
+    // Store in session
+    $_SESSION['verify_email'] = $loginEmail;
+    $_SESSION['verify_otp'] = $otp;
+    $_SESSION['verify_expiry'] = time() + 300; // 5 minutes
+    $_SESSION['verify_userID'] = $adminID;
+    
+    // Send via Brevo (same style as forgot_password.php)
+    $apiKey = BREVO_API_KEY;
+    $data = [
+        'sender' => ['name' => 'De Chavez Waterhaus', 'email' => 'cocacc202501@gmail.com'],
+        'to' => [['email' => $loginEmail]],
+        'subject' => 'Verify Your Email - De Chavez Waterhaus',
+        'htmlContent' => "
+            <h2>Email Verification Code</h2>
+            <p>Hi {$adminName},</p>
+            <p>Your verification code for your login email is: <strong style='font-size: 24px; color: #0077B6;'>$otp</strong></p>
+            <p>This code will expire in <strong>5 minutes</strong>.</p>
+            <p>Go to your Admin Profile to enter this code and verify your email.</p>
+        "
+    ];
+
+    $ch = curl_init('https://api.brevo.com/v3/smtp/email');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'accept: application/json',
+        'api-key: ' . $apiKey,
+        'content-type: application/json'
+    ]);
+    curl_exec($ch);
+    curl_close($ch);
+
+    echo '<script>alert("✅ Verification code sent to ' . htmlspecialchars($loginEmail) . '"); window.location = "profile.php";</script>';
+    exit();
+}
+
+// ==================== HANDLE VERIFY CODE ====================
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['verify_code'])) {
+    $entered_otp = trim($_POST['verification_code'] ?? '');
+    
+    if (time() > ($_SESSION['verify_expiry'] ?? 0)) {
+        echo '<script>alert("❌ Code expired. Please request a new one."); window.location = "profile.php";</script>';
+        exit();
+    } elseif ((string)$entered_otp !== (string)($_SESSION['verify_otp'] ?? '')) {
+        echo '<script>alert("❌ Invalid code. Please try again."); window.location = "profile.php";</script>';
+        exit();
+    } else {
+        // Mark login email as verified
+        $stmt = $conn->prepare("UPDATE customers SET email_verified = 1, email_verification_token = NULL WHERE userID = ?");
+        $stmt->bind_param("i", $adminID);
+        $stmt->execute();
+        $stmt->close();
+        
+        // Clear session
+        unset($_SESSION['verify_email'], $_SESSION['verify_otp'], $_SESSION['verify_expiry'], $_SESSION['verify_userID']);
+        
+        echo '<script>alert("🎉 Email verified successfully! Your login email can now be used for password recovery."); window.location = "profile.php";</script>';
+        exit();
+    }
+}
+
+// ==================== HANDLE PROFILE UPDATE ====================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_profile'])) {
     $firstname = htmlspecialchars($_POST['firstname']);
     $lastname = htmlspecialchars($_POST['lastname']);
     $email = filter_var($_POST['email'], FILTER_SANITIZE_EMAIL);
     $contact = htmlspecialchars($_POST['contact']);
     
-    // Validate email
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         echo '<script>alert("Invalid email format."); window.location = "profile.php";</script>';
         exit();
     }
     
-    // Check if email already exists (excluding current user)
+    // Check email uniqueness
     $emailCheck = $conn->prepare("SELECT userID FROM customers WHERE Email = ? AND userID != ?");
     $emailCheck->bind_param("si", $email, $adminID);
     $emailCheck->execute();
@@ -42,33 +120,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_profile'])) {
     }
     $emailCheck->close();
     
-    // Handle profile picture upload
+    // Handle profile picture
     $profilePicture = $admin['profile_picture'] ?? '';
     if (isset($_FILES['profile_picture']) && $_FILES['profile_picture']['error'] == 0) {
         $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-        $fileType = $_FILES['profile_picture']['type'];
-        
-        if (in_array($fileType, $allowedTypes)) {
+        if (in_array($_FILES['profile_picture']['type'], $allowedTypes)) {
             $fileName = 'admin_' . $adminID . '_' . time() . '.' . pathinfo($_FILES['profile_picture']['name'], PATHINFO_EXTENSION);
             $targetPath = $uploadDir . $fileName;
-            
             if (move_uploaded_file($_FILES['profile_picture']['tmp_name'], $targetPath)) {
-                // Delete old picture if exists
-                if (!empty($profilePicture) && file_exists('../' . $profilePicture)) {
-                    unlink('../' . $profilePicture);
-                }
+                if (!empty($profilePicture) && file_exists('../' . $profilePicture)) unlink('../' . $profilePicture);
                 $profilePicture = 'uploads/profile_pictures/' . $fileName;
             }
         }
     }
     
-    // Update profile
+    // Update profile (no recovery_email)
     $stmt = $conn->prepare("UPDATE customers SET Firstname = ?, Lastname = ?, Email = ?, Contact = ?, profile_picture = ? WHERE userID = ?");
     $stmt->bind_param("sssssi", $firstname, $lastname, $email, $contact, $profilePicture, $adminID);
     
     if ($stmt->execute()) {
+        // Reset email verification when email is changed (must verify the new email)
+        $conn->query("UPDATE customers SET email_verified = 0 WHERE userID = $adminID");
+        
         $_SESSION['userName'] = $firstname . ' ' . $lastname;
-        echo '<script>alert("Profile updated successfully!"); window.location = "profile.php";</script>';
+        echo '<script>alert("Profile updated successfully! Please verify your new email address."); window.location = "profile.php";</script>';
     } else {
         echo '<script>alert("Error updating profile."); window.location = "profile.php";</script>';
     }
@@ -81,19 +156,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
     $newPassword = $_POST['new_password'];
     $confirmPassword = $_POST['confirm_password'];
     
-    // Validate new password
-    if (strlen($newPassword) < 8) {
-        echo '<script>alert("Password must be at least 8 characters long."); window.location = "profile.php";</script>';
-        exit();
-    }
-    
-    if (!preg_match('/[A-Z]/', $newPassword)) {
-        echo '<script>alert("Password must contain at least one uppercase letter."); window.location = "profile.php";</script>';
-        exit();
-    }
-    
-    if (!preg_match('/[0-9]/', $newPassword)) {
-        echo '<script>alert("Password must contain at least one number."); window.location = "profile.php";</script>';
+    if (strlen($newPassword) < 8 || !preg_match('/[A-Z]/', $newPassword) || !preg_match('/[0-9]/', $newPassword)) {
+        echo '<script>alert("Password must be at least 8 characters with 1 uppercase letter and 1 number."); window.location = "profile.php";</script>';
         exit();
     }
     
@@ -102,16 +166,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
         exit();
     }
     
-    // Verify current password
     if (!password_verify($currentPassword, $admin['Password'])) {
         echo '<script>alert("Current password is incorrect."); window.location = "profile.php";</script>';
         exit();
     }
     
-    // Hash new password
     $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
-    
-    // Update password
     $stmt = $conn->prepare("UPDATE customers SET Password = ? WHERE userID = ?");
     $stmt->bind_param("si", $hashedPassword, $adminID);
     
@@ -123,17 +183,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
     $stmt->close();
 }
 
-// Handle Remove Profile Picture
+// Handle Remove Photo
 if (isset($_GET['remove_photo'])) {
     if (!empty($admin['profile_picture']) && file_exists('../' . $admin['profile_picture'])) {
         unlink('../' . $admin['profile_picture']);
     }
-    
     $stmt = $conn->prepare("UPDATE customers SET profile_picture = NULL WHERE userID = ?");
     $stmt->bind_param("i", $adminID);
     $stmt->execute();
     $stmt->close();
-    
     echo '<script>window.location = "profile.php";</script>';
     exit();
 }
@@ -157,19 +215,10 @@ if (isset($_GET['remove_photo'])) {
             position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
             background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
             transition: all 0.3s ease; 
-            display: flex;
-            flex-direction: column;
+            display: flex; flex-direction: column;
         }
-        .sidebar .nav-menu {
-            flex: 1;
-            overflow-y: auto;
-            padding-bottom: 20px;
-        }
-        .sidebar .logout-section {
-            padding: 15px 10px;
-            border-top: 1px solid #eee;
-            background: white;
-        }
+        .sidebar .nav-menu { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+        .sidebar .logout-section { padding: 15px 10px; border-top: 1px solid #eee; background: white; }
         .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
         .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
         .sidebar .nav-link { 
@@ -185,18 +234,9 @@ if (isset($_GET['remove_photo'])) {
         
         .section-title { font-weight: 700; color: #1e293b; margin-bottom: 20px; }
         
-        .sidebar .nav-link {
-            padding: 12px 18px;
-            margin: 2px 8px;
-            border-radius: 10px;
-        }
-        .sidebar::-webkit-scrollbar {
-            width: 6px;
-        }
-        .sidebar::-webkit-scrollbar-thumb {
-            background: #ccc;
-            border-radius: 3px;
-        }
+        .sidebar .nav-link { padding: 12px 18px; margin: 2px 8px; border-radius: 10px; }
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
 
         @media (max-width: 991.98px) {
             .main-content { margin-left: 0; padding: 20px; }
@@ -204,22 +244,15 @@ if (isset($_GET['remove_photo'])) {
             .sidebar.show { transform: translateX(0); }
         }
         
-        .profile-avatar {
-            width: 150px; height: 150px; border-radius: 50%; 
-            object-fit: cover; border: 5px solid #fff; 
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        }
-        .profile-avatar-placeholder {
-            width: 150px; height: 150px; border-radius: 50%; 
-            background: linear-gradient(135deg, #0077B6, #023E8A);
-            display: flex; align-items: center; justify-content: center;
-            color: white; font-size: 3rem; font-weight: bold;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        }
+        .profile-avatar { width: 150px; height: 150px; border-radius: 50%; object-fit: cover; border: 5px solid #fff; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .profile-avatar-placeholder { width: 150px; height: 150px; border-radius: 50%; background: linear-gradient(135deg, #0077B6, #023E8A); display: flex; align-items: center; justify-content: center; color: white; font-size: 3rem; font-weight: bold; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        
+        .verify-box { background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%); border-left: 5px solid #0077B6; border-radius: 12px; padding: 20px; }
+        .verified-badge { background: #10b981; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; }
     </style>
 </head>
 <body>
-    <!-- Sidebar -->
+    <!-- Sidebar (UNCHANGED) -->
     <div class="sidebar" id="sidebar">
         <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
             <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
@@ -322,20 +355,67 @@ if (isset($_GET['remove_photo'])) {
                             <div class="row g-3">
                                 <div class="col-md-6">
                                     <label class="form-label fw-semibold">First Name</label>
-                                    <input type="text" class="form-control" name="firstname" value="<?php echo htmlspecialchars($admin['Firstname']); ?>" required pattern="[A-Za-z\s]+" title="Only letters and spaces allowed">
+                                    <input type="text" class="form-control" name="firstname" value="<?php echo htmlspecialchars($admin['Firstname']); ?>" required>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label fw-semibold">Last Name</label>
-                                    <input type="text" class="form-control" name="lastname" value="<?php echo htmlspecialchars($admin['Lastname']); ?>" required pattern="[A-Za-z\s]+" title="Only letters and spaces allowed">
+                                    <input type="text" class="form-control" name="lastname" value="<?php echo htmlspecialchars($admin['Lastname']); ?>" required>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label fw-semibold">Email Address</label>
+                                    <label class="form-label fw-semibold">Login Email</label>
                                     <input type="email" class="form-control" name="email" value="<?php echo htmlspecialchars($admin['Email']); ?>" required>
+                                    <small class="text-muted">This email is used for login and password recovery</small>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label fw-semibold">Phone Number</label>
-                                    <input type="tel" class="form-control" name="contact" value="<?php echo htmlspecialchars($admin['Contact'] ?? ''); ?>" pattern="[0-9+\-\s]+" title="Only numbers, +, - and spaces allowed">
+                                    <input type="tel" class="form-control" name="contact" value="<?php echo htmlspecialchars($admin['Contact'] ?? ''); ?>">
                                 </div>
+                                
+                                <!-- EMAIL VERIFICATION (for login email only) -->
+                                <div class="col-12">
+                                    <div class="verify-box">
+                                        <label class="form-label fw-semibold text-primary mb-1">
+                                            <i class="fas fa-envelope me-2"></i> Verify Your Login Email
+                                        </label>
+                                        
+                                        <div class="d-flex align-items-center gap-2 mb-2">
+                                            <span class="text-muted"><?php echo htmlspecialchars($admin['Email']); ?></span>
+                                            
+                                            <?php 
+                                            $isVerified = !empty($admin['email_verified']) && $admin['email_verified'] == 1;
+                                            $hasPendingCode = !empty($_SESSION['verify_otp']) && !empty($_SESSION['verify_email']);
+                                            ?>
+                                            
+                                            <?php if ($isVerified): ?>
+                                                <span class="verified-badge"><i class="fas fa-check me-1"></i> Verified</span>
+                                            <?php else: ?>
+                                                <button type="submit" name="send_verification" class="btn btn-primary btn-sm">
+                                                    <i class="fas fa-paper-plane me-1"></i> Send Verification Code
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
+                                        
+                                        <small class="text-muted d-block mb-2">
+                                            Verify your login email so it can be used for password recovery on the Forgot Password page.
+                                        </small>
+                                        
+                                        <!-- Verification Code Input -->
+                                        <?php if ($hasPendingCode && !$isVerified): ?>
+                                            <div class="mt-3 p-3 bg-white rounded border">
+                                                <label class="form-label fw-semibold small mb-1">Enter the 6-digit code sent to <strong><?php echo htmlspecialchars($_SESSION['verify_email']); ?></strong>:</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="text" name="verification_code" class="form-control form-control-sm" 
+                                                           placeholder="123456" maxlength="6" style="max-width: 160px; font-size: 1.1rem; letter-spacing: 4px;" required>
+                                                    <button type="submit" name="verify_code" class="btn btn-success btn-sm px-4">
+                                                        <i class="fas fa-check me-1"></i> Verify
+                                                    </button>
+                                                </div>
+                                                <small class="text-muted">Code expires in 5 minutes.</small>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                
                                 <div class="col-12">
                                     <label class="form-label fw-semibold">Profile Picture</label>
                                     <input type="file" class="form-control" name="profile_picture" accept="image/jpeg,image/png,image/jpg,image/webp">
@@ -345,7 +425,7 @@ if (isset($_GET['remove_photo'])) {
                             
                             <div class="mt-4 pt-3 border-top">
                                 <button type="submit" name="update_profile" class="btn btn-primary px-5">
-                                    <i class="fas fa-save me-2"></i> Save Changes
+                                    <i class="fas fa-save me-2"></i> Save All Changes
                                 </button>
                             </div>
                         </form>
@@ -366,28 +446,22 @@ if (isset($_GET['remove_photo'])) {
                                     <label class="form-label fw-semibold">Current Password</label>
                                     <div class="input-group">
                                         <input type="password" class="form-control" name="current_password" id="current_password" required>
-                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('current_password')">
-                                            <i class="fas fa-eye"></i>
-                                        </button>
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('current_password')"><i class="fas fa-eye"></i></button>
                                     </div>
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label fw-semibold">New Password</label>
                                     <div class="input-group">
-                                        <input type="password" class="form-control" name="new_password" id="new_password" required minlength="8" pattern="(?=.*[A-Z])(?=.*[0-9]).{8,}" title="At least 8 characters with 1 uppercase and 1 number">
-                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('new_password')">
-                                            <i class="fas fa-eye"></i>
-                                        </button>
+                                        <input type="password" class="form-control" name="new_password" id="new_password" required minlength="8">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('new_password')"><i class="fas fa-eye"></i></button>
                                     </div>
-                                    <small class="text-muted">Min 8 chars, 1 uppercase, 1 number</small>
+                                    <small class="text-muted">Min 8 chars + 1 uppercase + 1 number</small>
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label fw-semibold">Confirm New Password</label>
                                     <div class="input-group">
                                         <input type="password" class="form-control" name="confirm_password" id="confirm_password" required>
-                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('confirm_password')">
-                                            <i class="fas fa-eye"></i>
-                                        </button>
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('confirm_password')"><i class="fas fa-eye"></i></button>
                                     </div>
                                 </div>
                             </div>
@@ -402,11 +476,18 @@ if (isset($_GET['remove_photo'])) {
                 </div>
             </div>
         </div>
+        
+        <div class="mt-4 p-3 bg-light rounded-3 border">
+            <small class="text-muted">
+                <i class="fas fa-info-circle me-1"></i> 
+                <strong>Note:</strong> Verifying your login email allows you to use the Forgot Password page to reset your password securely.
+            </small>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Mobile Sidebar Toggle
+        // Mobile sidebar toggle
         const sidebar = document.getElementById('sidebar');
         const mobileToggle = document.createElement('button');
         mobileToggle.className = 'btn btn-light d-lg-none position-fixed shadow-sm';
@@ -415,23 +496,21 @@ if (isset($_GET['remove_photo'])) {
         document.body.appendChild(mobileToggle);
         mobileToggle.addEventListener('click', () => sidebar.classList.toggle('show'));
 
-        // Password visibility toggle
         function togglePassword(fieldId) {
             const field = document.getElementById(fieldId);
-            const icon = event.currentTarget.querySelector('i') || event.target;
+            const btn = event.currentTarget || event.target.closest('button');
+            const icon = btn ? btn.querySelector('i') : null;
             
             if (field.type === 'password') {
                 field.type = 'text';
-                icon.classList.remove('fa-eye');
-                icon.classList.add('fa-eye-slash');
+                if (icon) { icon.classList.remove('fa-eye'); icon.classList.add('fa-eye-slash'); }
             } else {
                 field.type = 'password';
-                icon.classList.remove('fa-eye-slash');
-                icon.classList.add('fa-eye');
+                if (icon) { icon.classList.remove('fa-eye-slash'); icon.classList.add('fa-eye'); }
             }
         }
 
-        // Password confirmation validation
+        // Password form validation
         document.getElementById('passwordForm').addEventListener('submit', function(e) {
             const newPass = document.getElementById('new_password').value;
             const confirmPass = document.getElementById('confirm_password').value;
@@ -441,22 +520,9 @@ if (isset($_GET['remove_photo'])) {
                 alert('New passwords do not match!');
                 return false;
             }
-            
-            if (newPass.length < 8) {
+            if (newPass.length < 8 || !/[A-Z]/.test(newPass) || !/[0-9]/.test(newPass)) {
                 e.preventDefault();
-                alert('Password must be at least 8 characters long!');
-                return false;
-            }
-            
-            if (!/[A-Z]/.test(newPass)) {
-                e.preventDefault();
-                alert('Password must contain at least one uppercase letter!');
-                return false;
-            }
-            
-            if (!/[0-9]/.test(newPass)) {
-                e.preventDefault();
-                alert('Password must contain at least one number!');
+                alert('Password must be at least 8 characters with 1 uppercase letter and 1 number!');
                 return false;
             }
         });

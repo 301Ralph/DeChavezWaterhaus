@@ -118,20 +118,120 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
     <title>Forgot Password • De Chavez Waterhaus</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="icon" href="images/logo.jpg" type="image/x-icon">
     <style>
-        :root { --primary: #0077B6; --primary-dark: #023E8A; }
-        body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #0077B6, #023E8A); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .forgot-card { background: white; border-radius: 24px; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4); max-width: 420px; width: 100%; padding: 2.5rem; }
+        :root {
+            --deep:  #020d18;
+            --abyss: #030f1e;
+            --ocean: #041e35;
+            --navy:  #0a2d4a;
+            --teal:  #0077b6;
+            --aqua:  #00b4d8;
+            --cyan:  #48cae4;
+            --glow:  #90e0ef;
+            --foam:  #caf0f8;
+            --white: #f0f9ff;
+            --gold:  #f4c842;
+            --glass: rgba(0,180,216,0.08);
+            --glass-border: rgba(72,202,228,0.18);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--deep);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 30% 20%, rgba(0,180,216,0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 80%, rgba(72,202,228,0.06) 0%, transparent 50%);
+            z-index: 0;
+        }
+
+        .forgot-card {
+            background: linear-gradient(145deg, rgba(10,45,74,0.85), rgba(3,15,30,0.95));
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            max-width: 420px;
+            width: 100%;
+            padding: 2.5rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .form-control {
+            background: rgba(4,30,53,0.6);
+            border: 1px solid var(--glass-border);
+            color: var(--white);
+            border-radius: 12px;
+            padding: 14px 18px;
+        }
+
+        .form-control:focus {
+            border-color: var(--aqua);
+            box-shadow: 0 0 0 0.2rem rgba(0,180,216,0.15);
+            background: rgba(4,30,53,0.8);
+        }
+
+        .form-control::placeholder {
+            color: rgba(202,240,248,0.3);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--teal), var(--aqua));
+            border: none;
+            color: var(--deep);
+            font-weight: 600;
+            padding: 14px 0;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,180,216,0.4);
+        }
+
+        .text-muted-custom {
+            color: rgba(202,240,248,0.5);
+        }
+
+        .alert {
+            background: rgba(4,30,53,0.8);
+            border: 1px solid var(--glass-border);
+            color: var(--white);
+            border-radius: 12px;
+        }
+
+        .alert-success {
+            border-color: rgba(74,222,128,0.3);
+        }
+
+        .alert-danger {
+            border-color: rgba(248,113,113,0.3);
+        }
     </style>
 </head>
 <body>
     <div class="forgot-card">
         <div class="text-center mb-4">
-            <i class="fas fa-key fa-4x text-primary mb-3"></i>
-            <h4 class="fw-bold">Forgot Password</h4>
-            <p class="text-muted">We'll send a code to reset your password.</p>
+            <i class="fas fa-key fa-4x mb-3" style="color: var(--aqua);"></i>
+            <h4 class="fw-bold" style="color: var(--white); font-family: 'Cormorant Garamond', serif;">Forgot Password</h4>
+            <p class="text-muted-custom">We'll send a code to reset your password.</p>
         </div>
 
         <?php if ($success): ?>
@@ -149,7 +249,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
             <!-- Step 1: Enter Email -->
             <form method="POST">
                 <div class="mb-4">
-                    <label class="form-label fw-semibold">Email Address</label>
+                    <label class="form-label fw-semibold" style="color: var(--foam);">Email Address</label>
                     <input type="email" class="form-control" name="email" placeholder="you@example.com" required>
                 </div>
                 <button type="submit" name="send_otp" class="btn btn-primary w-100 py-3 rounded-pill">Send Reset Code</button>
@@ -158,9 +258,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
             <!-- Step 2: Enter OTP -->
             <form method="POST">
                 <div class="mb-4">
-                    <label class="form-label fw-semibold">Enter 6-digit Code</label>
+                    <label class="form-label fw-semibold" style="color: var(--foam);">Enter 6-digit Code</label>
                     <input type="text" class="form-control text-center" name="otp" maxlength="6" placeholder="000000" required style="font-size: 1.5rem; letter-spacing: 8px;">
-                    <div class="form-text">Sent to <?php echo htmlspecialchars($email); ?></div>
+                    <div class="form-text" style="color: rgba(202,240,248,0.4);">Sent to <?php echo htmlspecialchars($email); ?></div>
                 </div>
                 <button type="submit" name="verify_otp" class="btn btn-primary w-100 py-3 rounded-pill">Verify Code</button>
             </form>
@@ -168,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
             <!-- Step 3: New Password -->
             <form method="POST">
                 <div class="mb-3">
-                    <label class="form-label fw-semibold">New Password</label>
+                    <label class="form-label fw-semibold" style="color: var(--foam);">New Password</label>
                     <div class="input-group">
                         <input type="password" class="form-control" name="new_password" id="new_password" required minlength="8">
                         <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('new_password', 'newEye')">
@@ -177,7 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
                     </div>
                 </div>
                 <div class="mb-4">
-                    <label class="form-label fw-semibold">Confirm New Password</label>
+                    <label class="form-label fw-semibold" style="color: var(--foam);">Confirm New Password</label>
                     <div class="input-group">
                         <input type="password" class="form-control" name="confirm_password" id="confirm_password" required>
                         <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('confirm_password', 'confirmEye')">
@@ -190,7 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
         <?php endif; ?>
 
         <div class="text-center mt-4">
-            <a href="login.php" class="text-muted text-decoration-none small">← Back to Login</a>
+            <a href="login.php" class="text-muted-custom text-decoration-none small">← Back to Login</a>
         </div>
     </div>
 

@@ -8,10 +8,10 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'customer') {
     exit();
 }
 
-$userID = $_SESSION['userID'];
+$userID   = $_SESSION['userID'];
 $userName = $_SESSION['userName'];
 
-// Fetch user data for profile picture
+// Fetch user data
 $stmt = $conn->prepare("SELECT * FROM customers WHERE userID = ?");
 $stmt->bind_param("i", $userID);
 $stmt->execute();
@@ -36,6 +36,9 @@ $stmt->bind_param("i", $userID);
 $stmt->execute();
 $ordersResult = $stmt->get_result();
 $stmt->close();
+
+$notifCount = $conn->query("SELECT COUNT(*) as unread FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['unread'] ?? 0;
+$firstName = explode(' ', $userName)[0];
 ?>
 
 <!DOCTYPE html>
@@ -46,301 +49,699 @@ $stmt->close();
     <title>Order Tracking • De Chavez Waterhaus</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
-        :root { --primary: #0077B6; --primary-dark: #023E8A; }
-        body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
-        .sidebar { 
-            position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
-            background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
-            transition: all 0.3s ease;
+        :root {
+            --deep:  #020d18;
+            --abyss: #030f1e;
+            --ocean: #041e35;
+            --navy:  #0a2d4a;
+            --teal:  #0077b6;
+            --aqua:  #00b4d8;
+            --cyan:  #48cae4;
+            --glow:  #90e0ef;
+            --foam:  #caf0f8;
+            --white: #f0f9ff;
+            --gold:  #f4c842;
+            --glass: rgba(0,180,216,0.08);
+            --glass-border: rgba(72,202,228,0.18);
+            --sidebar-w: 260px;
         }
-        .sidebar.collapsed { width: 80px; }
-        .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
-        .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
-        .sidebar .nav-link { 
-            color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; 
-            font-weight: 500; transition: all 0.3s ease; border-radius: 12px; margin: 4px 10px;
-        }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { 
-            background-color: #f0f7ff; color: var(--primary); 
-        }
-        .sidebar .nav-link i { width: 22px; font-size: 1.1rem; }
 
-        .sidebar .nav-link {
-            padding: 12px 18px;
-            margin: 2px 8px;
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--deep);
+            color: var(--white);
+            min-height: 100vh;
+        }
+
+        /* ── SIDEBAR ── */
+        .sidebar {
+            position: fixed;
+            top: 0; left: 0;
+            height: 100vh;
+            width: var(--sidebar-w);
+            background: var(--abyss);
+            border-right: 1px solid var(--glass-border);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-logo {
+            padding: 24px 22px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid var(--glass-border);
+            flex-shrink: 0;
+        }
+
+        .sidebar-logo img {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid rgba(0,180,216,0.35);
+            box-shadow: 0 0 14px rgba(0,180,216,0.2);
+        }
+
+        .sidebar-logo span {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.05rem;
+            font-weight: 500;
+            color: var(--white);
+            line-height: 1.2;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 12px 20px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(72,202,228,0.15) transparent;
+        }
+
+        .sidebar-nav::-webkit-scrollbar { width: 4px; }
+        .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(72,202,228,0.15); border-radius: 2px; }
+
+        .nav-section-label {
+            font-size: 0.62rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: rgba(202,240,248,0.25);
+            padding: 16px 12px 6px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 11px 14px;
             border-radius: 10px;
+            color: rgba(202,240,248,0.5) !important;
+            text-decoration: none;
+            font-size: 0.87rem;
+            font-weight: 500;
+            transition: all 0.25s ease;
+            margin-bottom: 2px;
+            position: relative;
         }
-        .sidebar::-webkit-scrollbar {
-            width: 6px;
-        }
-        .sidebar::-webkit-scrollbar-thumb {
-            background: #ccc;
-            border-radius: 3px;
-        }
-        
-        .main-content { margin-left: 260px; padding: 30px; transition: margin-left 0.3s ease; }
-        .sidebar.collapsed ~ .main-content { margin-left: 80px; }
-        .order-card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #f0f0f0; transition: transform 0.2s ease; }
-        .order-card:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
-        .status-badge { padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; }
-        .status-pending { background: #fff3cd; color: #856404; }
-        .status-processing { background: #cce5ff; color: #004085; }
-        .status-delivery { background: #d4edda; color: #155724; }
-        .status-delivered { background: #28a745; color: white; }
-        .status-cancelled { background: #f8d7da; color: #721c24; }
-        .timeline { position: relative; padding-left: 30px; }
-        .timeline::before { content: ''; position: absolute; left: 15px; top: 0; bottom: 0; width: 3px; background: #e9ecef; }
-        .timeline-step { position: relative; margin-bottom: 20px; }
-        .timeline-step::before { content: ''; position: absolute; left: -30px; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #0077B6; z-index: 2; }
-        .timeline-step.completed::before { background: #28a745; border-color: #28a745; }
-        .timeline-step.current::before { background: #0077B6; border-color: #0077B6; animation: pulse 2s infinite; }
-        .timeline-step.cancelled::before { background: #dc3545; border-color: #dc3545; }
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,119,182,0.4); } 70% { box-shadow: 0 0 0 10px rgba(0,119,182,0); } 100% { box-shadow: 0 0 0 0 rgba(0,119,182,0); } }
 
-        /* Mobile Responsive */
-        @media (max-width: 991.98px) {
-            .main-content { margin-left: 0; padding: 20px; }
-            .sidebar { transform: translateX(-100%); }
-            .sidebar.show { transform: translateX(0); }
+        .nav-link i {
+            width: 18px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: rgba(0,180,216,0.4);
+            transition: color 0.25s;
         }
-        
+
+        .nav-link:hover {
+            background: var(--glass);
+            color: var(--foam) !important;
+        }
+
+        .nav-link:hover i { color: var(--aqua); }
+
+        .nav-link.active {
+            background: linear-gradient(135deg, rgba(0,119,182,0.25), rgba(0,180,216,0.12));
+            border: 1px solid rgba(0,180,216,0.2);
+            color: var(--aqua) !important;
+        }
+
+        .nav-link.active i { color: var(--aqua); }
+
+        .nav-link.active::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 20%; bottom: 20%;
+            width: 3px;
+            background: var(--aqua);
+            border-radius: 0 3px 3px 0;
+        }
+
+        .nav-link.danger { color: rgba(252,165,165,0.6) !important; }
+        .nav-link.danger i { color: rgba(252,165,165,0.5); }
+        .nav-link.danger:hover { background: rgba(248,113,113,0.08); color: #fca5a5 !important; }
+
+        /* ── MAIN ── */
+        .main-content {
+            margin-left: var(--sidebar-w);
+            min-height: 100vh;
+            padding: 28px 32px;
+            transition: margin-left 0.3s ease;
+        }
+
+        /* ── TOP BAR ── */
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+        }
+
+        .topbar-greeting h4 {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.7rem;
+            font-weight: 400;
+            color: var(--white);
+            line-height: 1.1;
+        }
+
+        .topbar-greeting p {
+            font-size: 0.82rem;
+            color: rgba(202,240,248,0.4);
+            margin-top: 2px;
+        }
+
+        .topbar-actions { display: flex; align-items: center; gap: 12px; }
+
+        .topbar-btn {
+            width: 42px; height: 42px;
+            border-radius: 50%;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            color: rgba(202,240,248,0.6);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.9rem;
+            text-decoration: none;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .topbar-btn:hover {
+            background: rgba(0,180,216,0.15);
+            border-color: var(--aqua);
+            color: var(--aqua);
+        }
+
+        .topbar-notif-badge {
+            position: absolute;
+            top: -3px; right: -3px;
+            background: var(--gold);
+            color: var(--deep);
+            font-size: 0.58rem;
+            font-weight: 700;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 50px;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 4px;
+        }
+
+        .avatar-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 50px;
+            padding: 6px 14px 6px 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .avatar-btn:hover {
+            border-color: rgba(0,180,216,0.35);
+            background: rgba(0,180,216,0.1);
+        }
+
+        .avatar-circle {
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--teal), var(--aqua));
+            color: var(--deep);
+            font-weight: 700;
+            font-size: 0.85rem;
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+
+        .avatar-name {
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--white);
+        }
+
+        .avatar-role {
+            font-size: 0.7rem;
+            color: rgba(202,240,248,0.4);
+        }
+
+        /* ── ORDER CARDS ── */
+        .order-card {
+            background: linear-gradient(145deg, rgba(10,45,74,0.6), rgba(3,15,30,0.8));
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            padding: 24px;
+            transition: all 0.35s cubic-bezier(0.23,1,0.32,1);
+        }
+
+        .order-card:hover {
+            transform: translateY(-6px);
+            border-color: rgba(0,180,216,0.3);
+            box-shadow: 0 20px 45px rgba(0,0,0,0.35);
+        }
+
+        .order-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .order-id {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--white);
+        }
+
+        .order-date {
+            font-size: 0.78rem;
+            color: rgba(202,240,248,0.4);
+            margin-top: 4px;
+        }
+
+        .status-pill {
+            padding: 6px 16px;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .pill-Pending { background: rgba(244,200,66,0.12); color: var(--gold); border: 1px solid rgba(244,200,66,0.25); }
+        .pill-Processing { background: rgba(0,180,216,0.1); color: var(--aqua); border: 1px solid rgba(0,180,216,0.25); }
+        .pill-Out-for-Delivery { background: rgba(0,119,182,0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+        .pill-Delivered { background: rgba(74,222,128,0.1); color: #4ade80; border: 1px solid rgba(74,222,128,0.25); }
+        .pill-Cancelled { background: rgba(248,113,113,0.1); color: #fca5a5; border: 1px solid rgba(248,113,113,0.25); }
+
+        /* ── TIMELINE ── */
+        .timeline {
+            position: relative;
+            padding-left: 32px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 11px;
+            top: 8px;
+            bottom: 8px;
+            width: 3px;
+            background: rgba(72,202,228,0.2);
+        }
+
+        .timeline-step {
+            position: relative;
+            margin-bottom: 18px;
+        }
+
+        .timeline-step:last-child { margin-bottom: 0; }
+
+        .timeline-dot {
+            position: absolute;
+            left: -32px;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--ocean);
+            border: 3px solid var(--aqua);
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .timeline-step.completed .timeline-dot {
+            background: #22c55e;
+            border-color: #22c55e;
+        }
+
+        .timeline-step.current .timeline-dot {
+            background: var(--aqua);
+            border-color: var(--aqua);
+            box-shadow: 0 0 0 6px rgba(0,180,216,0.2);
+            animation: pulse 2s infinite;
+        }
+
+        .timeline-step.cancelled .timeline-dot {
+            background: #ef4444;
+            border-color: #ef4444;
+        }
+
+        .timeline-dot i {
+            font-size: 0.7rem;
+            color: white;
+        }
+
+        .timeline-content {
+            padding-left: 8px;
+        }
+
+        .timeline-title {
+            font-weight: 600;
+            color: var(--white);
+            font-size: 0.92rem;
+        }
+
+        .timeline-subtitle {
+            font-size: 0.75rem;
+            color: rgba(202,240,248,0.4);
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(0,180,216,0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0,180,216,0); }
+            100% { box-shadow: 0 0 0 0 rgba(0,180,216,0); }
+        }
+
+        /* Modal */
+        .modal-content {
+            background: var(--ocean);
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+        }
+
+        .modal-header {
+            border-bottom: 1px solid var(--glass-border);
+            padding: 20px 24px;
+        }
+
+        .modal-footer {
+            border-top: 1px solid var(--glass-border);
+            padding: 20px 24px;
+        }
+
+        .modal-title {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.35rem;
+            font-weight: 500;
+        }
+
+        /* Mobile */
+        @media (max-width: 991px) {
+            .main-content { margin-left: 0; padding: 20px 18px; }
+        }
+
         @media (max-width: 576px) {
-            .main-content { padding: 15px; }
-            .order-card { margin-bottom: 15px; }
+            .main-content { padding: 16px 14px; }
+            .order-card { padding: 18px; }
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar -->
-    <div class="sidebar" id="sidebar">
-        <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
-            <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
-            <span class="fw-bold fs-5">De Chavez Waterhaus</span>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+        <img src="../images/logo.jpg" alt="Logo">
+        <span>De Chavez<br>Waterhaus</span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">Main</div>
+        <a href="customer_dashboard.php" class="nav-link">
+            <i class="fas fa-home"></i> Dashboard
+        </a>
+        <a href="products.php" class="nav-link">
+            <i class="fas fa-droplet"></i> Products
+        </a>
+        <a href="order_history.php" class="nav-link">
+            <i class="fas fa-history"></i> Order History
+        </a>
+        <a href="order_tracking.php" class="nav-link active">
+            <i class="fas fa-map-marker-alt"></i> Track Orders
+        </a>
+        <a href="recurring_orders.php" class="nav-link">
+            <i class="fas fa-redo"></i> Recurring Orders
+        </a>
+
+        <div class="nav-section-label">Account</div>
+        <a href="support_tickets.php" class="nav-link">
+            <i class="fas fa-headset"></i> Support
+        </a>
+        <a href="notifications.php" class="nav-link">
+            <i class="fas fa-bell"></i> Notifications
+        </a>
+        <a href="profile.php" class="nav-link">
+            <i class="fas fa-user"></i> Profile
+        </a>
+
+        <div class="nav-section-label" style="margin-top: 16px;"></div>
+        <a href="../logout.php" class="nav-link danger">
+            <i class="fas fa-sign-out-alt"></i> Logout
+        </a>
+    </nav>
+</aside>
+
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ── MAIN CONTENT ── -->
+<main class="main-content">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="d-flex align-items-center gap-3">
+            <button class="mobile-toggle d-lg-none" id="mobileToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="topbar-greeting">
+                <h4>Order Tracking</h4>
+                <p>Real-time status of your water deliveries</p>
+            </div>
         </div>
-        
-        <!-- Scrollable Menu -->
-        <div class="px-3 mt-2" style="height: calc(100vh - 90px); overflow-y: auto; padding-bottom: 20px;">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="customer_dashboard.php" class="nav-link"><i class="fas fa-home me-3"></i> <span>Dashboard</span></a></li>
-                <li class="nav-item"><a href="products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Products</span></a></li>
-                
-                <li class="nav-item"><a href="order_history.php" class="nav-link"><i class="fas fa-history me-3"></i> <span>Order History</span></a></li>
-                <li class="nav-item"><a href="order_tracking.php" class="nav-link active"><i class="fas fa-map-marker-alt me-3"></i> <span>Track Orders</span></a></li>
-                <li class="nav-item"><a href="recurring_orders.php" class="nav-link"><i class="fas fa-redo me-3"></i> <span>Recurring Orders</span></a></li>
-                <li class="nav-item"><a href="support_tickets.php" class="nav-link"><i class="fas fa-headset me-3"></i> <span>Support Tickets</span></a></li>
-                <li class="nav-item"><a href="notifications.php" class="nav-link"><i class="fas fa-bell me-3"></i> <span>Notifications</span></a></li>
-                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>Profile</span></a></li>
-                
-                <li class="nav-item mt-4"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
-            </ul>
+
+        <div class="topbar-actions">
+            <a href="notifications.php" class="topbar-btn">
+                <i class="fas fa-bell"></i>
+                <?php if ($notifCount > 0): ?>
+                    <span class="topbar-notif-badge"><?php echo $notifCount > 9 ? '9+' : $notifCount; ?></span>
+                <?php endif; ?>
+            </a>
+
+            <a href="products.php" class="btn btn-primary px-4 rounded-pill">
+                <i class="fas fa-plus me-2"></i> New Order
+            </a>
+
+            <div class="dropdown">
+                <div class="avatar-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <div class="avatar-circle">
+                        <?php if (!empty($user['profile_picture']) && file_exists('../' . $user['profile_picture'])): ?>
+                            <img src="../<?php echo htmlspecialchars($user['profile_picture']); ?>" alt="">
+                        <?php else: ?>
+                            <?php echo strtoupper(substr($userName, 0, 1)); ?>
+                        <?php endif; ?>
+                    </div>
+                    <div class="d-none d-md-block">
+                        <div class="avatar-name"><?php echo htmlspecialchars($userName); ?></div>
+                        <div class="avatar-role">Customer</div>
+                    </div>
+                    <i class="fas fa-chevron-down fa-xs ms-1" style="color:rgba(202,240,248,0.3);"></i>
+                </div>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                </ul>
+            </div>
         </div>
     </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <!-- IMPROVED MOBILE NAVBAR -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div class="d-flex align-items-center">
-                <!-- Hamburger Button -->
-                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
-                    <i class="fas fa-bars"></i>
-                </button>
-                
-                <div>
-                    <h4 class="fw-bold mb-0">Order Tracking</h4>
-                    <p class="text-muted mb-0 d-none d-sm-block">Track the status of your water deliveries</p>
-                </div>
-            </div>
-            
-            <div class="d-flex align-items-center gap-3">
-                <a href="products.php" class="btn btn-primary px-4 rounded-pill">
-                    <i class="fas fa-plus me-2"></i> New Order
-                </a>
-                
-                <div class="dropdown">
-                    <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center overflow-hidden" style="width: 38px; height: 38px;">
-                            <?php if (!empty($user['profile_picture']) && file_exists("../" . $user['profile_picture'])): ?>
-                                <img src="../<?php echo $user['profile_picture']; ?>" style="width: 38px; height: 38px; object-fit: cover;">
-                            <?php else: ?>
-                                <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
-                            <?php endif; ?>
+    <!-- Orders -->
+    <?php if ($ordersResult->num_rows > 0): ?>
+        <div class="row g-3">
+            <?php while ($order = $ordersResult->fetch_assoc()) { 
+                $status = $order['status'];
+                $badgeClass = match($status) {
+                    'Processing'       => 'pill-Processing',
+                    'Out for Delivery' => 'pill-Out-for-Delivery',
+                    'Delivered'        => 'pill-Delivered',
+                    'Cancelled'        => 'pill-Cancelled',
+                    default            => 'pill-Pending'
+                };
+            ?>
+                <div class="col-lg-6">
+                    <div class="order-card">
+                        <div class="order-header">
+                            <div>
+                                <div class="order-id">#<?php echo $order['orderID']; ?></div>
+                                <div class="order-date">
+                                    <i class="fas fa-calendar me-1"></i>
+                                    <?php echo date('F j, Y • g:i A', strtotime($order['order_date'])); ?>
+                                </div>
+                            </div>
+                            <span class="status-pill <?php echo $badgeClass; ?>">
+                                <?php echo $status; ?>
+                            </span>
                         </div>
-                        <div class="text-start d-none d-md-block">
-                            <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>
-                            <small class="text-muted">Customer</small>
-                        </div>
-                        <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow">
-                        <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
-                    </ul>
-                </div>
-            </div>
-        </div>
 
-        <?php if ($ordersResult->num_rows > 0): ?>
-            <div class="row g-4">
-                <?php while ($order = $ordersResult->fetch_assoc()) { 
-                    $status = $order['status'];
-                    
-                    // Determine badge class
-                    $badgeClass = 'status-pending';
-                    if ($status == 'Processing') $badgeClass = 'status-processing';
-                    if ($status == 'Out for Delivery') $badgeClass = 'status-delivery';
-                    if ($status == 'Delivered') $badgeClass = 'status-delivered';
-                    if ($status == 'Cancelled') $badgeClass = 'status-cancelled';
-                ?>
-                    <div class="col-lg-6">
-                        <div class="order-card p-4">
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <div>
-                                    <div class="fw-bold text-primary">Order #<?php echo $order['orderID']; ?></div>
-                                    <small class="text-muted"><?php echo date('F j, Y g:i A', strtotime($order['order_date'])); ?></small>
-                                </div>
-                                <span class="status-badge <?php echo $badgeClass; ?>"><?php echo $status; ?></span>
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span style="color: rgba(202,240,248,0.5);">Product</span>
+                                <span style="color: var(--foam);"><?php echo $order['ProductName']; ?> × <?php echo $order['quantity']; ?></span>
                             </div>
-                            
-                            <div class="mb-3">
-                                <div class="d-flex justify-content-between">
-                                    <span class="text-muted">Product:</span>
-                                    <span class="fw-semibold"><?php echo $order['ProductName']; ?> (x<?php echo $order['quantity']; ?>)</span>
-                                </div>
-                                <div class="d-flex justify-content-between">
-                                    <span class="text-muted">Total Amount:</span>
-                                    <span class="fw-bold text-success">₱<?php echo number_format($order['total_amount'], 2); ?></span>
-                                </div>
-                                <div class="d-flex justify-content-between">
-                                    <span class="text-muted">Payment:</span>
-                                    <span><?php echo $order['payment_method']; ?></span>
-                                </div>
+                            <div class="d-flex justify-content-between mb-1">
+                                <span style="color: rgba(202,240,248,0.5);">Total</span>
+                                <span class="fw-bold" style="color: var(--aqua);">₱<?php echo number_format($order['total_amount'], 2); ?></span>
                             </div>
-                            
-                            <!-- Timeline -->
-                            <div class="timeline mt-4">
-                                <div class="timeline-step <?php echo ($status != 'Pending' && $status != 'Cancelled') ? 'completed' : ($status == 'Pending' ? 'current' : 'cancelled'); ?>">
-                                    <div class="fw-semibold">Order Placed</div>
-                                    <small class="text-muted"><?php echo date('M j, g:i A', strtotime($order['order_date'])); ?></small>
+                            <div class="d-flex justify-content-between">
+                                <span style="color: rgba(202,240,248,0.5);">Payment</span>
+                                <span><?php echo $order['payment_method']; ?></span>
+                            </div>
+                        </div>
+
+                        <!-- Timeline -->
+                        <div class="timeline mt-4">
+                            <?php if ($status != 'Cancelled'): ?>
+                                <div class="timeline-step <?php echo ($status != 'Pending') ? 'completed' : 'current'; ?>">
+                                    <div class="timeline-dot"><i class="fas fa-check"></i></div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-title">Order Placed</div>
+                                        <div class="timeline-subtitle"><?php echo date('M j, g:i A', strtotime($order['order_date'])); ?></div>
+                                    </div>
                                 </div>
                                 
-                                <?php if ($status != 'Cancelled'): ?>
                                 <div class="timeline-step <?php echo ($status == 'Processing' || $status == 'Out for Delivery' || $status == 'Delivered') ? 'completed' : ($status == 'Pending' ? '' : 'current'); ?>">
-                                    <div class="fw-semibold">Processing</div>
-                                    <small class="text-muted">Preparing your order</small>
+                                    <div class="timeline-dot"><i class="fas fa-cog"></i></div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-title">Processing</div>
+                                        <div class="timeline-subtitle">Preparing your order</div>
+                                    </div>
                                 </div>
                                 
                                 <div class="timeline-step <?php echo ($status == 'Out for Delivery' || $status == 'Delivered') ? 'completed' : ($status == 'Processing' ? 'current' : ''); ?>">
-                                    <div class="fw-semibold">Out for Delivery</div>
-                                    <small class="text-muted"><?php echo $order['delivery_date'] ? date('M j', strtotime($order['delivery_date'])) : 'Scheduled soon'; ?></small>
+                                    <div class="timeline-dot"><i class="fas fa-truck"></i></div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-title">Out for Delivery</div>
+                                        <div class="timeline-subtitle">
+                                            <?php echo $order['delivery_date'] ? date('M j, Y', strtotime($order['delivery_date'])) : 'Scheduled soon'; ?>
+                                        </div>
+                                    </div>
                                 </div>
                                 
                                 <div class="timeline-step <?php echo ($status == 'Delivered') ? 'completed' : ($status == 'Out for Delivery' ? 'current' : ''); ?>">
-                                    <div class="fw-semibold">Delivered</div>
-                                    <small class="text-muted">Enjoy your water!</small>
-                                </div>
-                                <?php else: ?>
-                                <div class="timeline-step cancelled">
-                                    <div class="fw-semibold text-danger">Order Cancelled</div>
-                                    <small class="text-muted">This order has been cancelled</small>
-                                </div>
-                                <?php endif; ?>
-                            </div>
-                            
-                            <div class="mt-4 pt-3 border-top">
-                                <button class="btn btn-outline-primary btn-sm w-100" data-bs-toggle="modal" data-bs-target="#trackModal<?php echo $order['orderID']; ?>">
-                                    <i class="fas fa-map-marker-alt me-1"></i> View Details
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Order Detail Modal -->
-                    <div class="modal fade" id="trackModal<?php echo $order['orderID']; ?>" tabindex="-1">
-                        <div class="modal-dialog modal-dialog-centered">
-                            <div class="modal-content">
-                                <div class="modal-header">
-                                    <h5 class="modal-title fw-bold">Order #<?php echo $order['orderID']; ?> Details</h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                </div>
-                                <div class="modal-body p-4">
-                                    <div class="row g-3">
-                                        <div class="col-6">
-                                            <div class="text-muted small">Order Date</div>
-                                            <div class="fw-semibold"><?php echo date('F j, Y g:i A', strtotime($order['order_date'])); ?></div>
-                                        </div>
-                                        <div class="col-6">
-                                            <div class="text-muted small">Status</div>
-                                            <div><span class="status-badge <?php echo $badgeClass; ?>"><?php echo $status; ?></span></div>
-                                        </div>
-                                        <div class="col-6">
-                                            <div class="text-muted small">Product</div>
-                                            <div class="fw-semibold"><?php echo $order['ProductName']; ?></div>
-                                        </div>
-                                        <div class="col-6">
-                                            <div class="text-muted small">Quantity</div>
-                                            <div class="fw-semibold"><?php echo $order['quantity']; ?> gallons</div>
-                                        </div>
-                                        <div class="col-6">
-                                            <div class="text-muted small">Total Amount</div>
-                                            <div class="fw-bold text-success">₱<?php echo number_format($order['total_amount'], 2); ?></div>
-                                        </div>
-                                        <div class="col-6">
-                                            <div class="text-muted small">Payment Method</div>
-                                            <div class="fw-semibold"><?php echo $order['payment_method']; ?></div>
-                                        </div>
-                                        <?php if ($order['delivery_date']): ?>
-                                        <div class="col-12">
-                                            <div class="text-muted small">Scheduled Delivery</div>
-                                            <div class="fw-semibold"><?php echo date('F j, Y', strtotime($order['delivery_date'])); ?></div>
-                                        </div>
-                                        <?php endif; ?>
+                                    <div class="timeline-dot"><i class="fas fa-home"></i></div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-title">Delivered</div>
+                                        <div class="timeline-subtitle">Enjoy your water!</div>
                                     </div>
                                 </div>
-                                <div class="modal-footer border-0 p-4 pt-0">
-                                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button>
+                            <?php else: ?>
+                                <div class="timeline-step cancelled">
+                                    <div class="timeline-dot"><i class="fas fa-times"></i></div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-title text-danger">Order Cancelled</div>
+                                        <div class="timeline-subtitle">This order has been cancelled</div>
+                                    </div>
                                 </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="mt-4 pt-3" style="border-top: 1px solid var(--glass-border);">
+                            <button class="btn btn-glass w-100" data-bs-toggle="modal" data-bs-target="#trackModal<?php echo $order['orderID']; ?>">
+                                <i class="fas fa-map-marker-alt me-2"></i> View Full Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Order Detail Modal -->
+                <div class="modal fade" id="trackModal<?php echo $order['orderID']; ?>" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    <i class="fas fa-receipt me-2"></i> Order #<?php echo $order['orderID']; ?>
+                                </h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Order Date</div>
+                                        <div style="color: var(--foam);"><?php echo date('F j, Y g:i A', strtotime($order['order_date'])); ?></div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Status</div>
+                                        <div><span class="status-pill <?php echo $badgeClass; ?>"><?php echo $status; ?></span></div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Product</div>
+                                        <div style="color: var(--foam);"><?php echo $order['ProductName']; ?></div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Quantity</div>
+                                        <div style="color: var(--foam);"><?php echo $order['quantity']; ?> gallons</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Total Amount</div>
+                                        <div class="fw-bold" style="color: var(--aqua);">₱<?php echo number_format($order['total_amount'], 2); ?></div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Payment</div>
+                                        <div style="color: var(--foam);"><?php echo $order['payment_method']; ?></div>
+                                    </div>
+                                    <?php if ($order['delivery_date']): ?>
+                                    <div class="col-12">
+                                        <div style="color: rgba(202,240,248,0.5); font-size: 0.78rem;">Scheduled Delivery</div>
+                                        <div style="color: var(--foam);"><?php echo date('F j, Y', strtotime($order['delivery_date'])); ?></div>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
                             </div>
                         </div>
                     </div>
-                <?php } ?>
-            </div>
-        <?php else: ?>
-            <div class="text-center py-5">
-                <i class="fas fa-box-open fa-4x text-muted mb-4"></i>
-                <h5 class="fw-bold">No Orders Yet</h5>
-                <p class="text-muted">You haven't placed any orders yet.</p>
-                <a href="products.php" class="btn btn-primary px-5 rounded-pill">Browse Products</a>
-            </div>
-        <?php endif; ?>
-    </div>
+                </div>
+            <?php } ?>
+        </div>
+    <?php else: ?>
+        <div class="dash-card text-center py-5">
+            <i class="fas fa-box-open fa-4x mb-4" style="color: rgba(0,180,216,0.15);"></i>
+            <h5 class="fw-semibold mb-2">No Orders Yet</h5>
+            <p class="text-muted mb-4">You haven't placed any orders yet.</p>
+            <a href="products.php" class="btn btn-primary px-5">
+                <i class="fas fa-shopping-cart me-2"></i> Browse Products
+            </a>
+        </div>
+    <?php endif; ?>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Mobile Sidebar Toggle
-        const sidebar = document.getElementById('sidebar');
-        const mobileToggle = document.getElementById('mobileToggle');
-        
-        if (mobileToggle) {
-            mobileToggle.addEventListener('click', () => {
-                sidebar.classList.toggle('show');
-            });
-            
-            document.addEventListener('click', function(e) {
-                if (window.innerWidth < 992 && !sidebar.contains(e.target) && !mobileToggle.contains(e.target)) {
-                    sidebar.classList.remove('show');
-                }
-            });
-        }
-        
-        // Auto-refresh every 30 seconds
-        setTimeout(() => {
-            location.reload();
-        }, 30000);
-    </script>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Mobile Sidebar
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const toggle = document.getElementById('mobileToggle');
+
+    function openSidebar() { sidebar.classList.add('show'); overlay.classList.add('show'); }
+    function closeSidebar() { sidebar.classList.remove('show'); overlay.classList.remove('show'); }
+
+    if (toggle) toggle.addEventListener('click', openSidebar);
+    if (overlay) overlay.addEventListener('click', closeSidebar);
+
+    sidebar.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', () => {
+            if (window.innerWidth < 992) closeSidebar();
+        });
+    });
+
+    // Auto-refresh every 30 seconds
+    setTimeout(() => {
+        location.reload();
+    }, 30000);
+</script>
 </body>
 </html>
