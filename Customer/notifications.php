@@ -22,10 +22,10 @@ $stmt->execute();
 $user = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-$notifCount = $conn->query("SELECT COUNT(*) as unread FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['unread'] ?? 0;
-$firstName = explode(' ', $userName)[0];
+$notifCount = 0; // already marked read above
+$firstName  = explode(' ', $userName)[0];
+$totalCount = $notifs->num_rows;
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -144,11 +144,7 @@ $firstName = explode(' ', $userName)[0];
             transition: color 0.25s;
         }
 
-        .nav-link:hover {
-            background: var(--glass);
-            color: var(--foam) !important;
-        }
-
+        .nav-link:hover { background: var(--glass); color: var(--foam) !important; }
         .nav-link:hover i { color: var(--aqua); }
 
         .nav-link.active {
@@ -177,7 +173,6 @@ $firstName = explode(' ', $userName)[0];
             margin-left: var(--sidebar-w);
             min-height: 100vh;
             padding: 28px 32px;
-            transition: margin-left 0.3s ease;
         }
 
         /* ── TOP BAR ── */
@@ -223,20 +218,6 @@ $firstName = explode(' ', $userName)[0];
             color: var(--aqua);
         }
 
-        .topbar-notif-badge {
-            position: absolute;
-            top: -3px; right: -3px;
-            background: var(--gold);
-            color: var(--deep);
-            font-size: 0.58rem;
-            font-weight: 700;
-            min-width: 16px;
-            height: 16px;
-            border-radius: 50px;
-            display: flex; align-items: center; justify-content: center;
-            padding: 0 4px;
-        }
-
         .avatar-btn {
             display: flex;
             align-items: center;
@@ -267,99 +248,300 @@ $firstName = explode(' ', $userName)[0];
         }
 
         .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-name { font-size: 0.82rem; font-weight: 500; color: var(--white); }
+        .avatar-role { font-size: 0.7rem; color: rgba(202,240,248,0.4); }
 
-        .avatar-name {
-            font-size: 0.82rem;
-            font-weight: 500;
-            color: var(--white);
+        /* dropdown */
+        .dropdown-menu {
+            background: var(--ocean) !important;
+            border: 1px solid var(--glass-border) !important;
+            border-radius: 14px !important;
+            padding: 8px !important;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5) !important;
         }
 
-        .avatar-role {
-            font-size: 0.7rem;
-            color: rgba(202,240,248,0.4);
+        .dropdown-item {
+            color: rgba(202,240,248,0.65) !important;
+            border-radius: 8px !important;
+            padding: 9px 14px !important;
+            font-size: 0.84rem !important;
+            transition: all 0.2s !important;
         }
 
-        /* ── NOTIFICATIONS ── */
-        .notification-card {
-            background: linear-gradient(145deg, rgba(10,45,74,0.6), rgba(3,15,30,0.8));
-            border: 1px solid var(--glass-border);
-            border-radius: 16px;
-            padding: 20px 24px;
-            margin-bottom: 14px;
-            transition: all 0.3s ease;
-            border-left: 4px solid var(--aqua);
-        }
+        .dropdown-item:hover { background: var(--glass) !important; color: var(--aqua) !important; }
+        .dropdown-item.text-danger { color: rgba(252,165,165,0.7) !important; }
+        .dropdown-item.text-danger:hover { background: rgba(248,113,113,0.08) !important; color: #fca5a5 !important; }
+        .dropdown-divider { border-color: var(--glass-border) !important; margin: 4px 0 !important; }
 
-        .notification-card.unread {
-            border-left-color: var(--gold);
-            background: linear-gradient(145deg, rgba(244,200,66,0.08), rgba(3,15,30,0.85));
-        }
-
-        .notification-card:hover {
-            transform: translateX(4px);
-            border-color: rgba(0,180,216,0.3);
-        }
-
-        .notification-icon {
-            width: 46px;
-            height: 46px;
-            border-radius: 12px;
-            background: rgba(0,180,216,0.1);
-            color: var(--aqua);
+        /* ── PAGE HEADER ── */
+        .page-header {
+            background: linear-gradient(135deg, rgba(0,119,182,0.2), rgba(0,180,216,0.08));
+            border: 1px solid rgba(0,180,216,0.2);
+            border-radius: 18px;
+            padding: 28px 32px;
+            margin-bottom: 28px;
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .page-header-icon {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, var(--teal), var(--aqua));
+            color: var(--deep);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.4rem;
+            flex-shrink: 0;
+            box-shadow: 0 6px 20px rgba(0,180,216,0.3);
+        }
+
+        .page-header-title {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.7rem;
+            font-weight: 400;
+            color: var(--white);
+            line-height: 1.1;
+        }
+
+        .page-header-sub {
+            font-size: 0.82rem;
+            color: rgba(202,240,248,0.45);
+            margin-top: 3px;
+        }
+
+        .count-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 50px;
+            padding: 8px 18px;
+            font-size: 0.82rem;
+            color: rgba(202,240,248,0.6);
+        }
+
+        .count-pill strong { color: var(--aqua); font-size: 1.1rem; font-family: 'Cormorant Garamond', serif; }
+
+        /* ── FILTER TABS ── */
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 22px;
+            flex-wrap: wrap;
+        }
+
+        .filter-tab {
+            padding: 7px 18px;
+            border-radius: 50px;
+            border: 1px solid var(--glass-border);
+            background: transparent;
+            color: rgba(202,240,248,0.45);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.25s;
+        }
+
+        .filter-tab:hover { border-color: rgba(0,180,216,0.3); color: var(--foam); }
+
+        .filter-tab.active {
+            background: linear-gradient(135deg, var(--teal), var(--aqua));
+            border-color: transparent;
+            color: var(--deep);
+            font-weight: 600;
+            box-shadow: 0 4px 14px rgba(0,180,216,0.25);
+        }
+
+        /* ── NOTIFICATION ITEMS ── */
+        .notif-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            background: linear-gradient(145deg, rgba(10,45,74,0.55), rgba(3,15,30,0.75));
+            border: 1px solid var(--glass-border);
+            border-left: 3px solid rgba(0,180,216,0.3);
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin-bottom: 10px;
+            position: relative;
+            transition: all 0.3s ease;
+            animation: slideIn 0.4s ease both;
+        }
+
+        .notif-item:hover {
+            transform: translateX(4px);
+            border-color: rgba(0,180,216,0.3);
+            border-left-color: var(--aqua);
+            background: linear-gradient(145deg, rgba(10,45,74,0.7), rgba(3,15,30,0.85));
+        }
+
+        .notif-item.is-unread {
+            border-left-color: var(--gold);
+            background: linear-gradient(145deg, rgba(244,200,66,0.07), rgba(3,15,30,0.82));
+        }
+
+        .notif-item.is-unread:hover { border-left-color: var(--gold); }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* stagger delay */
+        .notif-item:nth-child(1)  { animation-delay: 0.05s; }
+        .notif-item:nth-child(2)  { animation-delay: 0.10s; }
+        .notif-item:nth-child(3)  { animation-delay: 0.15s; }
+        .notif-item:nth-child(4)  { animation-delay: 0.20s; }
+        .notif-item:nth-child(5)  { animation-delay: 0.25s; }
+        .notif-item:nth-child(n+6){ animation-delay: 0.30s; }
+
+        .notif-icon-wrap {
+            width: 44px; height: 44px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem;
             flex-shrink: 0;
         }
 
-        .notification-unread-dot {
-            width: 8px;
-            height: 8px;
-            background: var(--gold);
-            border-radius: 50%;
-            position: absolute;
-            top: 20px;
-            right: 20px;
+        .notif-icon-wrap.order   { background: rgba(0,180,216,0.1);  color: var(--aqua); }
+        .notif-icon-wrap.deliver { background: rgba(74,222,128,0.1); color: #4ade80; }
+        .notif-icon-wrap.alert   { background: rgba(244,200,66,0.1); color: var(--gold); }
+        .notif-icon-wrap.info    { background: rgba(167,139,250,0.1);color: #a78bfa; }
+        .notif-icon-wrap.default { background: var(--glass); color: rgba(202,240,248,0.5); }
+
+        .notif-body { flex: 1; min-width: 0; }
+
+        .notif-message {
+            font-size: 0.91rem;
+            color: var(--foam);
+            line-height: 1.55;
+            margin-bottom: 6px;
+            word-break: break-word;
         }
 
-        .notification-message {
-            font-size: 0.95rem;
-            line-height: 1.5;
-            color: var(--foam);
+        .notif-item.is-unread .notif-message { color: var(--white); font-weight: 500; }
+
+        .notif-time {
+            font-size: 0.73rem;
+            color: rgba(202,240,248,0.35);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .unread-dot {
+            position: absolute;
+            top: 18px; right: 18px;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--gold);
+            box-shadow: 0 0 8px rgba(244,200,66,0.5);
+            animation: pulseDot 2s ease-in-out infinite;
+        }
+
+        @keyframes pulseDot {
+            0%,100% { opacity:1; transform:scale(1); }
+            50%      { opacity:0.5; transform:scale(0.7); }
+        }
+
+        /* ── DATE GROUP LABEL ── */
+        .date-group-label {
+            font-size: 0.68rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: rgba(202,240,248,0.25);
+            padding: 16px 4px 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .date-group-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--glass-border);
+        }
+
+        /* ── EMPTY STATE ── */
+        .empty-state {
+            text-align: center;
+            padding: 72px 20px;
+            background: linear-gradient(145deg, rgba(10,45,74,0.4), rgba(3,15,30,0.6));
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+        }
+
+        .empty-ring {
+            width: 90px; height: 90px;
+            border-radius: 50%;
+            background: rgba(0,180,216,0.07);
+            border: 1px solid rgba(0,180,216,0.12);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 2rem;
+            color: rgba(0,180,216,0.25);
+        }
+
+        .empty-state h5 {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.4rem;
+            font-weight: 400;
+            color: var(--white);
             margin-bottom: 8px;
         }
 
-        .notification-time {
-            font-size: 0.75rem;
+        .empty-state p {
+            font-size: 0.86rem;
             color: rgba(202,240,248,0.35);
         }
 
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
+        /* ── MOBILE OVERLAY ── */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(2,13,24,0.7);
+            z-index: 999;
+            backdrop-filter: blur(3px);
         }
 
-        .empty-state i {
-            font-size: 3.5rem;
-            color: rgba(0,180,216,0.15);
-            margin-bottom: 20px;
+        .mobile-toggle {
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            color: var(--aqua);
+            width: 40px; height: 40px;
+            border-radius: 10px;
+            display: none;
+            align-items: center; justify-content: center;
+            cursor: pointer;
+            font-size: 0.9rem;
         }
 
-        /* Mobile Responsive */
+        /* ── RESPONSIVE ── */
         @media (max-width: 991px) {
+            .sidebar { transform: translateX(-100%); box-shadow: 4px 0 40px rgba(0,0,0,0.5); }
+            .sidebar.show { transform: translateX(0); }
+            .sidebar-overlay.show { display: block; }
             .main-content { margin-left: 0; padding: 20px 18px; }
+            .mobile-toggle { display: flex; }
         }
 
         @media (max-width: 576px) {
             .main-content { padding: 16px 14px; }
-            .notification-card { padding: 16px 18px; }
+            .page-header { padding: 20px; }
+            .page-header-title { font-size: 1.4rem; }
         }
     </style>
 </head>
 <body>
 
-<!-- ── SIDEBAR (Same as Dashboard) ── -->
+<!-- ── SIDEBAR ── -->
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
         <img src="../images/logo.jpg" alt="Logo">
@@ -368,37 +550,19 @@ $firstName = explode(' ', $userName)[0];
 
     <nav class="sidebar-nav">
         <div class="nav-section-label">Main</div>
-        <a href="customer_dashboard.php" class="nav-link">
-            <i class="fas fa-home"></i> Dashboard
-        </a>
-        <a href="products.php" class="nav-link">
-            <i class="fas fa-droplet"></i> Products
-        </a>
-        <a href="order_history.php" class="nav-link">
-            <i class="fas fa-history"></i> Order History
-        </a>
-        <a href="order_tracking.php" class="nav-link">
-            <i class="fas fa-map-marker-alt"></i> Track Orders
-        </a>
-        <a href="recurring_orders.php" class="nav-link">
-            <i class="fas fa-redo"></i> Recurring Orders
-        </a>
+        <a href="customer_dashboard.php" class="nav-link"><i class="fas fa-home"></i> Dashboard</a>
+        <a href="products.php"           class="nav-link"><i class="fas fa-droplet"></i> Products</a>
+        <a href="order_history.php"      class="nav-link"><i class="fas fa-history"></i> Order History</a>
+        <a href="order_tracking.php"     class="nav-link"><i class="fas fa-map-marker-alt"></i> Track Orders</a>
+        <a href="recurring_orders.php"   class="nav-link"><i class="fas fa-redo"></i> Recurring Orders</a>
 
         <div class="nav-section-label">Account</div>
-        <a href="support_tickets.php" class="nav-link">
-            <i class="fas fa-headset"></i> Support
-        </a>
-        <a href="notifications.php" class="nav-link active">
-            <i class="fas fa-bell"></i> Notifications
-        </a>
-        <a href="profile.php" class="nav-link">
-            <i class="fas fa-user"></i> Profile
-        </a>
+        <a href="support_tickets.php" class="nav-link"><i class="fas fa-headset"></i> Support</a>
+        <a href="notifications.php"   class="nav-link active"><i class="fas fa-bell"></i> Notifications</a>
+        <a href="profile.php"         class="nav-link"><i class="fas fa-user"></i> Profile</a>
 
-        <div class="nav-section-label" style="margin-top: 16px;"></div>
-        <a href="../logout.php" class="nav-link danger">
-            <i class="fas fa-sign-out-alt"></i> Logout
-        </a>
+        <div class="nav-section-label" style="margin-top:16px;"></div>
+        <a href="../logout.php" class="nav-link danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
     </nav>
 </aside>
 
@@ -410,9 +574,7 @@ $firstName = explode(' ', $userName)[0];
     <!-- Top Bar -->
     <div class="topbar">
         <div class="d-flex align-items-center gap-3">
-            <button class="mobile-toggle d-lg-none" id="mobileToggle">
-                <i class="fas fa-bars"></i>
-            </button>
+            <button class="mobile-toggle" id="mobileToggle"><i class="fas fa-bars"></i></button>
             <div class="topbar-greeting">
                 <h4>Notifications</h4>
                 <p>Stay updated with your orders and account activity</p>
@@ -448,75 +610,147 @@ $firstName = explode(' ', $userName)[0];
         </div>
     </div>
 
-    <!-- Notifications Content -->
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h5 class="mb-1" style="font-family: 'Cormorant Garamond', serif; font-size: 1.4rem;">Your Notifications</h5>
-                    <p class="text-muted mb-0 small">All notifications are marked as read when you open this page</p>
-                </div>
-                <div>
-                    <span class="badge bg-secondary px-3 py-2 rounded-pill">
-                        <i class="fas fa-bell me-1"></i> <?php echo $notifs->num_rows; ?> Total
-                    </span>
-                </div>
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="d-flex align-items-center gap-3">
+            <div class="page-header-icon"><i class="fas fa-bell"></i></div>
+            <div>
+                <div class="page-header-title">Your Notifications</div>
+                <div class="page-header-sub">All notifications are marked as read when you open this page</div>
             </div>
-
-            <?php if ($notifs->num_rows > 0): ?>
-                <?php while ($notif = $notifs->fetch_assoc()) { 
-                    $isUnread = $notif['is_read'] == 0;
-                ?>
-                    <div class="notification-card <?php echo $isUnread ? 'unread' : ''; ?>">
-                        <div class="d-flex align-items-start">
-                            <div class="notification-icon me-3">
-                                <i class="fas fa-bell"></i>
-                            </div>
-                            <div class="flex-grow-1">
-                                <div class="notification-message">
-                                    <?php echo htmlspecialchars($notif['message']); ?>
-                                </div>
-                                <div class="notification-time">
-                                    <i class="fas fa-clock me-1"></i>
-                                    <?php echo date('F j, Y • g:i A', strtotime($notif['created_at'])); ?>
-                                </div>
-                            </div>
-                            <?php if ($isUnread): ?>
-                                <div class="notification-unread-dot"></div>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                <?php } ?>
-            <?php else: ?>
-                <div class="dash-card text-center py-5">
-                    <i class="fas fa-bell-slash fa-4x mb-4" style="color: rgba(0,180,216,0.15);"></i>
-                    <h5 class="fw-semibold mb-2">You're all caught up!</h5>
-                    <p class="text-muted mb-0">No notifications at the moment.</p>
-                </div>
-            <?php endif; ?>
+        </div>
+        <div class="count-pill">
+            <i class="fas fa-layer-group" style="color:rgba(0,180,216,0.5);"></i>
+            <strong><?php echo $totalCount; ?></strong> total
         </div>
     </div>
+
+    <?php if ($totalCount > 0): ?>
+
+        <!-- Filter tabs -->
+        <div class="filter-tabs">
+            <button class="filter-tab active" onclick="filterNotifs('all', this)">All</button>
+            <button class="filter-tab" onclick="filterNotifs('order', this)">Orders</button>
+            <button class="filter-tab" onclick="filterNotifs('deliver', this)">Deliveries</button>
+            <button class="filter-tab" onclick="filterNotifs('alert', this)">Alerts</button>
+        </div>
+
+        <!-- Notifications list -->
+        <div id="notifList">
+            <?php
+            $notifs->data_seek(0);
+            $prevDate = null;
+
+            while ($notif = $notifs->fetch_assoc()):
+                $isUnread  = $notif['is_read'] == 0;
+                $msg       = htmlspecialchars($notif['message']);
+                $msgLower  = strtolower($notif['message']);
+                $createdAt = strtotime($notif['created_at']);
+                $dateLabel = date('Y-m-d', $createdAt);
+                $today     = date('Y-m-d');
+                $yesterday = date('Y-m-d', strtotime('-1 day'));
+
+                // Determine type
+                if (str_contains($msgLower, 'deliver') || str_contains($msgLower, 'out for')) {
+                    $type = 'deliver'; $icon = 'fa-truck'; $iconClass = 'deliver';
+                } elseif (str_contains($msgLower, 'order') || str_contains($msgLower, 'placed')) {
+                    $type = 'order'; $icon = 'fa-shopping-bag'; $iconClass = 'order';
+                } elseif (str_contains($msgLower, 'payment') || str_contains($msgLower, 'cancel') || str_contains($msgLower, 'fail')) {
+                    $type = 'alert'; $icon = 'fa-exclamation-triangle'; $iconClass = 'alert';
+                } else {
+                    $type = 'info'; $icon = 'fa-info-circle'; $iconClass = 'default';
+                }
+
+                // Date group label
+                if ($dateLabel !== $prevDate):
+                    $labelText = match(true) {
+                        $dateLabel === $today     => 'Today',
+                        $dateLabel === $yesterday => 'Yesterday',
+                        default                   => date('F j, Y', $createdAt)
+                    };
+            ?>
+                <div class="date-group-label"><?php echo $labelText; ?></div>
+            <?php
+                    $prevDate = $dateLabel;
+                endif;
+            ?>
+
+            <div class="notif-item <?php echo $isUnread ? 'is-unread' : ''; ?>" data-type="<?php echo $type; ?>">
+                <div class="notif-icon-wrap <?php echo $iconClass; ?>">
+                    <i class="fas <?php echo $icon; ?>"></i>
+                </div>
+                <div class="notif-body">
+                    <div class="notif-message"><?php echo $msg; ?></div>
+                    <div class="notif-time">
+                        <i class="fas fa-clock"></i>
+                        <?php echo date('g:i A', $createdAt); ?>
+                        <?php if ($dateLabel !== $today && $dateLabel !== $yesterday): ?>
+                            · <?php echo date('M j', $createdAt); ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php if ($isUnread): ?><div class="unread-dot"></div><?php endif; ?>
+            </div>
+
+            <?php endwhile; ?>
+        </div>
+
+    <?php else: ?>
+
+        <!-- Empty state -->
+        <div class="empty-state">
+            <div class="empty-ring"><i class="fas fa-bell-slash"></i></div>
+            <h5>You're all caught up!</h5>
+            <p>No notifications at the moment. We'll let you know when something happens.</p>
+        </div>
+
+    <?php endif; ?>
 
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // Mobile Sidebar
+    // ── SIDEBAR MOBILE ──
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebarOverlay');
-    const toggle = document.getElementById('mobileToggle');
+    const toggle  = document.getElementById('mobileToggle');
 
-    function openSidebar() { sidebar.classList.add('show'); overlay.classList.add('show'); }
+    function openSidebar()  { sidebar.classList.add('show'); overlay.classList.add('show'); }
     function closeSidebar() { sidebar.classList.remove('show'); overlay.classList.remove('show'); }
 
-    if (toggle) toggle.addEventListener('click', openSidebar);
+    if (toggle)  toggle.addEventListener('click', openSidebar);
     if (overlay) overlay.addEventListener('click', closeSidebar);
 
     sidebar.querySelectorAll('.nav-link').forEach(link => {
-        link.addEventListener('click', () => {
-            if (window.innerWidth < 992) closeSidebar();
-        });
+        link.addEventListener('click', () => { if (window.innerWidth < 992) closeSidebar(); });
     });
+
+    // ── FILTER TABS ──
+    function filterNotifs(type, btn) {
+        // Update active tab
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Show/hide items
+        document.querySelectorAll('.notif-item').forEach(item => {
+            const match = type === 'all' || item.dataset.type === type;
+            item.style.display = match ? 'flex' : 'none';
+        });
+
+        // Show/hide date group labels (only if at least one notif visible follows it)
+        document.querySelectorAll('.date-group-label').forEach(label => {
+            let next = label.nextElementSibling;
+            let hasVisible = false;
+            while (next && !next.classList.contains('date-group-label')) {
+                if (next.classList.contains('notif-item') && next.style.display !== 'none') {
+                    hasVisible = true;
+                    break;
+                }
+                next = next.nextElementSibling;
+            }
+            label.style.display = hasVisible ? '' : 'none';
+        });
+    }
 </script>
 </body>
 </html>

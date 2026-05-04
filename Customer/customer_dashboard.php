@@ -769,7 +769,7 @@ $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good
                 <p class="mt-1">Thank you for being part of the De Chavez family.</p>
             </div>
             <div class="col-md-4 text-md-end mt-3 mt-md-0">
-                <a href="orders.php" class="btn-order-now">
+                <a href="products.php" class="btn-order-now">
                     <i class="fas fa-plus"></i> Order Now
                 </a>
             </div>
@@ -816,7 +816,7 @@ $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good
             <div class="dash-card h-100">
                 <div class="dash-card-title">Quick Actions</div>
 
-                <a href="orders.php" class="qa-btn">
+                <a href="products.php" class="qa-btn">
                     <div class="qa-icon"><i class="fas fa-plus"></i></div>
                     <div>
                         <div class="qa-label">Place New Order</div>
@@ -877,7 +877,7 @@ $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good
                                     <div class="order-date">Placed <?php echo date('M d, Y · h:i A', strtotime($currentOrder['order_date'])); ?></div>
                                     <div class="order-amount mt-2">₱<?php echo number_format($currentOrder['total_amount'], 2); ?></div>
                                 </div>
-                                <a href="orders.php?order_id=<?php echo $currentOrder['orderID']; ?>" class="btn-track">
+                                <a href="order_tracking.php" class="btn-track">
                                     <i class="fas fa-location-dot me-2"></i> Track Order
                                 </a>
                             </div>
@@ -885,7 +885,7 @@ $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good
                             <div class="text-center py-4">
                                 <i class="fas fa-truck fa-2x mb-3" style="color:rgba(0,180,216,0.2);"></i>
                                 <p style="color:rgba(202,240,248,0.4); font-size:0.88rem; margin-bottom:16px;">No active orders at the moment.</p>
-                                <a href="orders.php" class="btn-order-now" style="padding:10px 24px; font-size:0.8rem;">
+                                <a href="products.php" class="btn-order-now" style="padding:10px 24px; font-size:0.8rem;">
                                     <i class="fas fa-plus"></i> Place Your First Order
                                 </a>
                             </div>
