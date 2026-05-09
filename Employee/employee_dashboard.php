@@ -2,13 +2,12 @@
 include '../includes/connection.php';
 session_start();
 
-// Security check - Employee only
 if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'employee') {
     echo '<script>alert("Access denied. Employees only."); window.location = "../login.php";</script>';
     exit();
 }
 
-$userID = $_SESSION['userID'];
+$userID   = $_SESSION['userID'];
 $userName = $_SESSION['userName'];
 
 // Fetch employee data
@@ -22,29 +21,24 @@ $stmt->close();
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_photo'])) {
     if (isset($_FILES['profile_picture']) && $_FILES['profile_picture']['error'] == 0) {
         $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-        $filename = $_FILES['profile_picture']['name'];
-        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        
+        $ext     = strtolower(pathinfo($_FILES['profile_picture']['name'], PATHINFO_EXTENSION));
+
         if (in_array($ext, $allowed)) {
-            $newname = 'employee_' . $userID . '_' . time() . '.' . $ext;
+            $newname     = 'employee_' . $userID . '_' . time() . '.' . $ext;
             $upload_path = '../uploads/profile_pictures/' . $newname;
-            
-            if (!is_dir('../uploads/profile_pictures/')) {
-                mkdir('../uploads/profile_pictures/', 0777, true);
-            }
-            
+
+            if (!is_dir('../uploads/profile_pictures/')) mkdir('../uploads/profile_pictures/', 0777, true);
+
             if (move_uploaded_file($_FILES['profile_picture']['tmp_name'], $upload_path)) {
-                // Delete old photo if exists
                 if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])) {
                     unlink('../' . $employee['profile_picture']);
                 }
-                
-                $update = $conn->prepare("UPDATE customers SET profile_picture = ? WHERE userID = ?");
+
+                $update  = $conn->prepare("UPDATE customers SET profile_picture = ? WHERE userID = ?");
                 $db_path = 'uploads/profile_pictures/' . $newname;
                 $update->bind_param("si", $db_path, $userID);
-                $update->execute();
-                $update->close();
-                
+                $update->execute(); $update->close();
+
                 echo '<script>alert("Profile picture updated!"); window.location = "employee_dashboard.php";</script>';
                 exit();
             }
@@ -54,41 +48,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['upload_photo'])) {
     }
 }
 
-// Fetch assigned orders (from deliveries table - where assignments are stored)
-$assignedOrders = 0;
-try {
-    $result = $conn->query("
-        SELECT COUNT(*) as count 
-        FROM deliveries d
-        JOIN orders o ON d.orderID = o.orderID
-        WHERE d.riderID = $userID 
-        AND o.status IN ('Pending', 'Processing', 'Out for Delivery')
-    ");
-    if ($result) {
-        $assignedOrders = $result->fetch_assoc()['count'] ?? 0;
-    }
-} catch (Exception $e) {
-    // Tables might not exist yet
-}
-
-// Fetch completed deliveries
+// Fetch stats (safe - catch if tables don't exist)
+$assignedOrders     = 0;
 $completedDeliveries = 0;
-try {
-    $result = $conn->query("
-        SELECT COUNT(*) as count 
-        FROM deliveries d
-        JOIN orders o ON d.orderID = o.orderID
-        WHERE d.riderID = $userID 
-        AND o.status = 'Delivered'
-    ");
-    if ($result) {
-        $completedDeliveries = $result->fetch_assoc()['count'] ?? 0;
-    }
-} catch (Exception $e) {
-    // Tables might not exist yet
-}
-?>
 
+try {
+    $r = $conn->query("SELECT COUNT(*) as count FROM deliveries d JOIN orders o ON d.orderID = o.orderID WHERE d.riderID = $userID AND o.status IN ('Pending','Processing','Out for Delivery')");
+    if ($r) $assignedOrders = $r->fetch_assoc()['count'] ?? 0;
+} catch (Exception $e) {}
+
+try {
+    $r = $conn->query("SELECT COUNT(*) as count FROM deliveries d JOIN orders o ON d.orderID = o.orderID WHERE d.riderID = $userID AND o.status = 'Delivered'");
+    if ($r) $completedDeliveries = $r->fetch_assoc()['count'] ?? 0;
+} catch (Exception $e) {}
+
+// Today's attendance
+$today      = date('Y-m-d');
+$clockCheck = $conn->prepare("SELECT * FROM attendance WHERE userID = ? AND DATE(clock_in) = ? AND clock_out IS NULL");
+$clockCheck->bind_param("is", $userID, $today);
+$clockCheck->execute();
+$currentShift = $clockCheck->get_result()->fetch_assoc();
+$clockCheck->close();
+$isClockedIn = $currentShift !== null;
+
+$completedCheck = $conn->prepare("SELECT attendanceID FROM attendance WHERE userID = ? AND DATE(clock_in) = ? AND clock_out IS NOT NULL");
+$completedCheck->bind_param("is", $userID, $today);
+$completedCheck->execute();
+$hasCompletedToday = $completedCheck->get_result()->num_rows > 0;
+$completedCheck->close();
+
+// Monthly hours
+$monthStmt = $conn->prepare("SELECT SUM(total_hours) as total FROM attendance WHERE userID = ? AND MONTH(clock_in) = MONTH(NOW()) AND YEAR(clock_in) = YEAR(NOW())");
+$monthStmt->bind_param("i", $userID);
+$monthStmt->execute();
+$totalHoursMonth = $monthStmt->get_result()->fetch_assoc()['total'] ?? 0;
+$monthStmt->close();
+
+$notifCount = $conn->query("SELECT COUNT(*) as unread FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['unread'] ?? 0;
+$firstName  = explode(' ', $userName)[0];
+
+$hour     = (int)date('H');
+$greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
+$hourlyRate = $employee['hourly_rate'] ?? 100;
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -97,322 +99,586 @@ try {
     <title>Employee Dashboard • De Chavez Waterhaus</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
-        :root { --primary: #0077B6; --primary-dark: #023E8A; }
-        body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
-        
-        .sidebar { 
-            position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
-            background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
-            transition: all 0.3s ease; 
-            display: flex;
-            flex-direction: column;
+        :root {
+            --deep:  #020d18;  --abyss: #030f1e;  --ocean: #041e35;  --navy:  #0a2d4a;
+            --teal:  #0077b6;  --aqua:  #00b4d8;  --cyan:  #48cae4;  --glow:  #90e0ef;
+            --foam:  #caf0f8;  --white: #f0f9ff;  --gold:  #f4c842;
+            --green: #4ade80;  --violet: #a78bfa;
+            --glass: rgba(0,180,216,0.08);  --glass-border: rgba(72,202,228,0.18);
+            --sidebar-w: 260px;
         }
-        .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
-        .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
-        .sidebar .nav-link { 
-            color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; 
-            font-weight: 500; transition: all 0.3s ease; border-radius: 12px; margin: 4px 10px;
-        }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { 
-            background-color: #f0f7ff; color: var(--primary); 
-        }
-        .sidebar .nav-link i { width: 22px; font-size: 1.1rem; }
-        
-        .main-content { margin-left: 260px; padding: 30px; transition: margin-left 0.3s ease; }
-        
-        .stat-card { 
-            background: white; border-radius: 20px; padding: 24px; 
-            box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #f0f0f0;
-            transition: transform 0.3s ease;
-        }
-        .stat-card:hover { transform: translateY(-5px); }
-        .stat-icon { 
-            width: 60px; height: 60px; border-radius: 16px; 
-            display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
-        }
-        
-        .nav-menu { flex: 1; overflow-y: auto; padding-bottom: 20px; }
-        .logout-section { padding: 15px 10px; border-top: 1px solid #eee; background: white; }
-        
-        @media (max-width: 991.98px) {
-            .main-content { margin-left: 0; padding: 20px; }
-            .sidebar { transform: translateX(-100%); }
-            .sidebar.show { transform: translateX(0); }
-        }
-        
-        .profile-upload {
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'DM Sans', sans-serif; background: var(--deep); color: var(--white); min-height: 100vh; }
+
+        /* ── SIDEBAR ── */
+        .sidebar { position: fixed; top: 0; left: 0; height: 100vh; width: var(--sidebar-w); background: var(--abyss); border-right: 1px solid var(--glass-border); z-index: 1000; display: flex; flex-direction: column; transition: transform 0.3s ease; }
+        .sidebar-logo { padding: 24px 22px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--glass-border); flex-shrink: 0; }
+        .sidebar-logo img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(0,180,216,0.35); box-shadow: 0 0 14px rgba(0,180,216,0.2); }
+        .sidebar-logo-text { font-family: 'Cormorant Garamond', serif; font-size: 1.05rem; font-weight: 500; color: var(--white); line-height: 1.2; }
+        .sidebar-logo-sub { font-size: 0.68rem; color: rgba(202,240,248,0.3); letter-spacing: 0.1em; text-transform: uppercase; }
+        .sidebar-nav { flex: 1; overflow-y: auto; padding: 16px 12px 16px; scrollbar-width: thin; scrollbar-color: rgba(72,202,228,0.15) transparent; }
+        .sidebar-nav::-webkit-scrollbar { width: 4px; }
+        .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(72,202,228,0.15); border-radius: 2px; }
+        .nav-section-label { font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(202,240,248,0.25); padding: 16px 12px 6px; }
+        .nav-link { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px; color: rgba(202,240,248,0.5) !important; text-decoration: none; font-size: 0.87rem; font-weight: 500; transition: all 0.25s ease; margin-bottom: 2px; position: relative; }
+        .nav-link i { width: 18px; text-align: center; font-size: 0.9rem; color: rgba(0,180,216,0.4); transition: color 0.25s; }
+        .nav-link:hover { background: var(--glass); color: var(--foam) !important; }
+        .nav-link:hover i { color: var(--aqua); }
+        .nav-link.active { background: linear-gradient(135deg, rgba(0,119,182,0.25), rgba(0,180,216,0.12)); border: 1px solid rgba(0,180,216,0.2); color: var(--aqua) !important; }
+        .nav-link.active i { color: var(--aqua); }
+        .nav-link.active::before { content: ''; position: absolute; left: 0; top: 20%; bottom: 20%; width: 3px; background: var(--aqua); border-radius: 0 3px 3px 0; }
+        .nav-link.danger { color: rgba(252,165,165,0.6) !important; }
+        .nav-link.danger i { color: rgba(252,165,165,0.5); }
+        .nav-link.danger:hover { background: rgba(248,113,113,0.08); color: #fca5a5 !important; }
+        .sidebar-footer { padding: 14px 12px; border-top: 1px solid var(--glass-border); flex-shrink: 0; }
+
+        /* ── MAIN ── */
+        .main-content { margin-left: var(--sidebar-w); min-height: 100vh; padding: 28px 32px; }
+
+        /* ── TOP BAR ── */
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+        .topbar-left h4 { font-family: 'Cormorant Garamond', serif; font-size: 1.7rem; font-weight: 400; color: var(--white); line-height: 1.1; }
+        .topbar-left p { font-size: 0.82rem; color: rgba(202,240,248,0.4); margin-top: 2px; }
+        .topbar-right { display: flex; align-items: center; gap: 12px; }
+        .topbar-btn { width: 42px; height: 42px; border-radius: 50%; background: var(--glass); border: 1px solid var(--glass-border); color: rgba(202,240,248,0.6); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; text-decoration: none; transition: all 0.3s; position: relative; cursor: pointer; }
+        .topbar-btn:hover { background: rgba(0,180,216,0.15); border-color: var(--aqua); color: var(--aqua); }
+        .topbar-notif-badge { position: absolute; top: -3px; right: -3px; background: var(--gold); color: var(--deep); font-size: 0.58rem; font-weight: 700; min-width: 16px; height: 16px; border-radius: 50px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+        .avatar-btn { display: flex; align-items: center; gap: 10px; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 50px; padding: 6px 14px 6px 6px; cursor: pointer; transition: all 0.3s; }
+        .avatar-btn:hover { border-color: rgba(0,180,216,0.35); background: rgba(0,180,216,0.1); }
+        .avatar-circle { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+        .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-name { font-size: 0.82rem; font-weight: 500; color: var(--white); }
+        .avatar-role { font-size: 0.7rem; color: rgba(202,240,248,0.4); }
+        .dropdown-menu { background: var(--ocean) !important; border: 1px solid var(--glass-border) !important; border-radius: 14px !important; padding: 8px !important; box-shadow: 0 20px 50px rgba(0,0,0,0.5) !important; }
+        .dropdown-item { color: rgba(202,240,248,0.65) !important; border-radius: 8px !important; padding: 9px 14px !important; font-size: 0.84rem !important; transition: all 0.2s !important; }
+        .dropdown-item:hover { background: var(--glass) !important; color: var(--aqua) !important; }
+        .dropdown-item.text-danger { color: rgba(252,165,165,0.7) !important; }
+        .dropdown-item.text-danger:hover { background: rgba(248,113,113,0.08) !important; color: #fca5a5 !important; }
+        .dropdown-divider { border-color: var(--glass-border) !important; margin: 4px 0 !important; }
+
+        /* ── WELCOME BANNER ── */
+        .welcome-banner {
+            background: linear-gradient(135deg, rgba(0,119,182,0.3), rgba(0,180,216,0.15));
+            border: 1px solid rgba(0,180,216,0.25);
+            border-radius: 20px;
+            padding: 30px 36px;
+            margin-bottom: 28px;
             position: relative;
-            display: inline-block;
+            overflow: hidden;
         }
-        .profile-upload input[type="file"] {
-            position: absolute;
-            opacity: 0;
-            width: 100%;
-            height: 100%;
+
+        .welcome-banner::before { content: ''; position: absolute; top: -60px; right: -60px; width: 200px; height: 200px; border-radius: 50%; background: rgba(0,180,216,0.07); }
+        .welcome-banner::after  { content: ''; position: absolute; bottom: -80px; right: 100px; width: 160px; height: 160px; border-radius: 50%; background: rgba(0,119,182,0.08); }
+
+        .welcome-title { font-family: 'Cormorant Garamond', serif; font-size: 1.85rem; font-weight: 400; color: var(--white); margin-bottom: 6px; }
+        .welcome-sub   { font-size: 0.88rem; color: rgba(202,240,248,0.55); }
+
+        .status-orb {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 7px 16px; border-radius: 50px;
+            font-size: 0.78rem; font-weight: 600;
+            position: relative; z-index: 1;
+            margin-top: 16px;
+        }
+
+        .orb-active   { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.25); color: var(--green); }
+        .orb-complete { background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.25); color: var(--violet); }
+        .orb-idle     { background: var(--glass); border: 1px solid var(--glass-border); color: rgba(202,240,248,0.45); }
+
+        .orb-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: orbPulse 2s ease-in-out infinite; }
+        @keyframes orbPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+
+        /* ── STAT CARDS ── */
+        .stat-card {
+            background: linear-gradient(145deg, rgba(10,45,74,0.65), rgba(3,15,30,0.85));
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            padding: 24px 22px;
+            display: flex; align-items: center; gap: 18px;
+            transition: all 0.35s cubic-bezier(0.23,1,0.32,1);
+            position: relative; overflow: hidden;
+        }
+
+        .stat-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(0,180,216,0.3), transparent); opacity: 0; transition: opacity 0.3s; }
+        .stat-card:hover { transform: translateY(-6px); border-color: rgba(0,180,216,0.28); box-shadow: 0 20px 48px rgba(0,0,0,0.35); }
+        .stat-card:hover::after { opacity: 1; }
+
+        .stat-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0; }
+        .si-blue   { background: rgba(0,180,216,0.12); color: var(--aqua); }
+        .si-green  { background: rgba(74,222,128,0.1); color: var(--green); }
+        .si-gold   { background: rgba(244,200,66,0.1); color: var(--gold); }
+        .si-violet { background: rgba(167,139,250,0.1); color: var(--violet); }
+
+        .stat-num { font-family: 'Cormorant Garamond', serif; font-size: 2rem; font-weight: 600; color: var(--white); line-height: 1; }
+        .stat-lbl { font-size: 0.73rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(202,240,248,0.35); margin-top: 3px; }
+
+        /* ── TODAY STATUS CARD ── */
+        .today-card {
+            background: linear-gradient(145deg, rgba(10,45,74,0.55), rgba(3,15,30,0.78));
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            padding: 26px;
+        }
+
+        .today-card-title { font-family: 'Cormorant Garamond', serif; font-size: 1.2rem; font-weight: 500; color: var(--white); margin-bottom: 18px; }
+
+        .clock-mini {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 2.4rem; font-weight: 300;
+            color: var(--white); line-height: 1;
+            letter-spacing: -0.02em;
+        }
+
+        .clock-mini .ampm { font-size: 1rem; color: var(--aqua); margin-left: 4px; }
+
+        .today-info-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(72,202,228,0.07); }
+        .today-info-row:last-child { border-bottom: none; }
+        .today-info-label { font-size: 0.78rem; color: rgba(202,240,248,0.4); }
+        .today-info-value { font-size: 0.88rem; font-weight: 500; color: var(--foam); }
+
+        /* quick clock btn in today card */
+        .btn-quick-clock {
+            width: 100%; padding: 12px;
+            border: none; border-radius: 50px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.83rem; font-weight: 700;
+            letter-spacing: 0.1em; text-transform: uppercase;
+            cursor: pointer; transition: all 0.3s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            text-decoration: none; margin-top: 18px;
+        }
+
+        .btn-qc-in  { background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); box-shadow: 0 5px 18px rgba(0,180,216,0.3); }
+        .btn-qc-in:hover  { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(0,180,216,0.5); color: var(--deep); }
+        .btn-qc-out { background: linear-gradient(135deg, #dc2626, #ef4444); color: white; box-shadow: 0 5px 18px rgba(239,68,68,0.3); }
+        .btn-qc-out:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(239,68,68,0.5); }
+        .btn-qc-done { background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.25); color: var(--violet); cursor: not-allowed; }
+
+        /* ── QUICK ACTIONS ── */
+        .qa-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+
+        .qa-btn {
+            display: flex; align-items: center; gap: 14px;
+            padding: 18px 18px;
+            background: rgba(4,30,53,0.55);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            text-decoration: none;
+            color: var(--foam);
+            transition: all 0.3s;
             cursor: pointer;
+        }
+
+        .qa-btn:hover { background: var(--glass); border-color: rgba(0,180,216,0.3); color: var(--white); transform: translateX(3px); }
+
+        .qa-icon { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); display: flex; align-items: center; justify-content: center; font-size: 0.95rem; flex-shrink: 0; }
+        .qa-icon.red { background: linear-gradient(135deg, #dc2626, #ef4444); }
+        .qa-icon.violet { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
+        .qa-icon.gold { background: linear-gradient(135deg, #b45309, #f4c842); }
+
+        .qa-label { font-size: 0.87rem; font-weight: 500; }
+        .qa-sub   { font-size: 0.73rem; color: rgba(202,240,248,0.4); margin-top: 2px; }
+        .qa-arrow { margin-left: auto; color: rgba(0,180,216,0.3); font-size: 0.75rem; transition: all 0.3s; }
+        .qa-btn:hover .qa-arrow { color: var(--aqua); transform: translateX(3px); }
+
+        /* ── MODAL ── */
+        .modal-content { background: var(--ocean) !important; border: 1px solid var(--glass-border) !important; border-radius: 20px !important; }
+        .modal-header { border-bottom: 1px solid var(--glass-border) !important; padding: 22px 26px !important; }
+        .modal-footer { border-top: 1px solid var(--glass-border) !important; padding: 18px 26px !important; }
+        .modal-body { padding: 26px !important; }
+        .modal-title { font-family: 'Cormorant Garamond', serif !important; font-size: 1.35rem !important; font-weight: 500 !important; color: var(--white) !important; }
+        .btn-close { filter: invert(0.7) opacity(0.7); }
+        .btn-close:hover { filter: invert(1); }
+
+        .field-label { display: block; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(202,240,248,0.45); margin-bottom: 8px; }
+        .field-input { width: 100%; background: rgba(4,30,53,0.7); border: 1px solid var(--glass-border); color: var(--white); font-family: 'DM Sans', sans-serif; font-size: 0.9rem; padding: 12px 15px; border-radius: 12px; outline: none; transition: all 0.3s; }
+        .field-input:focus { border-color: var(--aqua); background: rgba(0,180,216,0.07); box-shadow: 0 0 0 3px rgba(0,180,216,0.08); }
+
+        .btn-glass { display: inline-flex; align-items: center; gap: 6px; background: var(--glass); border: 1px solid var(--glass-border); color: var(--aqua); padding: 10px 20px; border-radius: 50px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+        .btn-glass:hover { background: rgba(0,180,216,0.15); color: var(--foam); }
+
+        .btn-submit { padding: 12px 28px; background: linear-gradient(135deg, var(--teal), var(--aqua)); border: none; border-radius: 50px; color: var(--deep); font-family: 'DM Sans', sans-serif; font-size: 0.84rem; font-weight: 700; letter-spacing: 0.08em; cursor: pointer; transition: all 0.3s; box-shadow: 0 5px 18px rgba(0,180,216,0.3); }
+        .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(0,180,216,0.5); }
+
+        /* avatar preview in modal */
+        .avatar-preview { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(0,180,216,0.35); box-shadow: 0 0 20px rgba(0,180,216,0.15); }
+        .avatar-initial-lg { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); font-family: 'Cormorant Garamond', serif; font-size: 2.8rem; display: flex; align-items: center; justify-content: center; margin: 0 auto; border: 2px solid rgba(0,180,216,0.35); }
+
+        /* ── MOBILE ── */
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(2,13,24,0.7); z-index: 999; backdrop-filter: blur(3px); }
+        .mobile-toggle { background: var(--glass); border: 1px solid var(--glass-border); color: var(--aqua); width: 40px; height: 40px; border-radius: 10px; display: none; align-items: center; justify-content: center; cursor: pointer; font-size: 0.9rem; }
+
+        @media (max-width: 991px) {
+            .sidebar { transform: translateX(-100%); box-shadow: 4px 0 40px rgba(0,0,0,0.5); }
+            .sidebar.show { transform: translateX(0); }
+            .sidebar-overlay.show { display: block; }
+            .main-content { margin-left: 0; padding: 20px 18px; }
+            .mobile-toggle { display: flex; }
+            .qa-grid { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 576px) {
+            .main-content { padding: 16px 14px; }
+            .welcome-banner { padding: 22px 20px; }
+            .welcome-title { font-size: 1.5rem; }
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar -->
-    <div class="sidebar" id="sidebar">
-        <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
-            <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
-            <div>
-                <span class="fw-bold fs-5">De Chavez Waterhaus</span>
-                <small class="d-block text-muted">Employee Portal</small>
-            </div>
-        </div>
-        
-        <div class="nav-menu px-3 mt-2">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="employee_dashboard.php" class="nav-link active"><i class="fas fa-tachometer-alt me-3"></i> <span>Dashboard</span></a></li>
-                <li class="nav-item"><a href="attendance.php" class="nav-link"><i class="fas fa-clock me-3"></i> <span>Attendance</span></a></li>
-                <li class="nav-item"><a href="payslip.php" class="nav-link"><i class="fas fa-file-invoice-dollar me-3"></i> <span>My Payslip</span></a></li>
-                <li class="nav-item"><a href="leave_request.php" class="nav-link"><i class="fas fa-calendar-alt me-3"></i> <span>Leave Requests</span></a></li>
-                <li class="nav-item"><a href="my_deliveries.php" class="nav-link"><i class="fas fa-truck me-3"></i> <span>My Deliveries</span></a></li>
-                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>My Profile</span></a></li>
-            </ul>
-        </div>
-        
-        <div class="logout-section">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
-            </ul>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+        <img src="../images/logo.jpg" alt="Logo">
+        <div>
+            <div class="sidebar-logo-text">De Chavez Waterhaus</div>
+            <div class="sidebar-logo-sub">Employee Portal</div>
         </div>
     </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <!-- Top Navbar -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div class="d-flex align-items-center">
-                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
-                    <i class="fas fa-bars"></i>
-                </button>
-                <div>
-                    <h4 class="fw-bold mb-0 d-none d-sm-block">Good morning, <?php echo htmlspecialchars(explode(' ', $userName)[0]); ?>!</h4>
-                    <h4 class="fw-bold mb-0 d-sm-none">Hi, <?php echo htmlspecialchars(explode(' ', $userName)[0]); ?>!</h4>
-                    <p class="text-muted mb-0 d-none d-sm-block">Welcome back to your employee portal</p>
-                </div>
-            </div>
-            
-            <div class="d-flex align-items-center gap-3">
-                <!-- Notification Bell -->
-                <div class="dropdown">
-                    <button class="btn btn-light position-relative" data-bs-toggle="dropdown" style="width: 42px; height: 42px; border-radius: 12px;">
-                        <i class="fas fa-bell fa-lg"></i>
-                        <?php 
-                        $unreadCount = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['count'] ?? 0;
-                        if ($unreadCount > 0): 
-                        ?>
-                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 9px; padding: 2px 6px;">
-                                <?php echo min($unreadCount, 9); ?><?php echo $unreadCount > 9 ? '+' : ''; ?>
-                            </span>
-                        <?php endif; ?>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow" style="width: 320px; max-height: 400px; overflow-y: auto;">
-                        <li class="dropdown-header fw-bold d-flex justify-content-between align-items-center">
-                            <span>Notifications</span>
-                            <?php if ($unreadCount > 0): ?>
-                                <a href="notifications.php" class="text-primary small text-decoration-none">Mark all read</a>
-                            <?php endif; ?>
-                        </li>
-                        <?php 
-                        $notifs = $conn->query("SELECT * FROM notifications WHERE userID = $userID ORDER BY created_at DESC LIMIT 5");
-                        if ($notifs->num_rows > 0):
-                            while ($n = $notifs->fetch_assoc()):
-                        ?>
-                            <li>
-                                <a class="dropdown-item small py-2" href="notifications.php">
-                                    <div class="d-flex">
-                                        <div class="me-2">
-                                            <i class="fas fa-bell text-primary"></i>
-                                        </div>
-                                        <div class="flex-grow-1">
-                                            <?php echo htmlspecialchars($n['message']); ?>
-                                            <div class="text-muted" style="font-size: 10px;"><?php echo date('M d, g:i A', strtotime($n['created_at'])); ?></div>
-                                        </div>
-                                    </div>
-                                </a>
-                            </li>
-                        <?php endwhile; else: ?>
-                            <li><span class="dropdown-item text-muted small py-3">You're all caught up!</span></li>
-                        <?php endif; ?>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-center small text-primary py-2" href="notifications.php"><strong>View All Notifications</strong></a></li>
-                    </ul>
-                </div>
-                
-                <div class="dropdown">
-                    <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                        <?php if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])): ?>
-                            <img src="../<?php echo $employee['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
-                        <?php else: ?>
-                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                                <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
-                            </div>
-                        <?php endif; ?>
-                        <div class="text-start d-none d-md-block">
-                            <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>
-                            <small class="text-muted">Employee</small>
-                        </div>
-                        <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow">
-                        <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
-                    </ul>
-                </div>
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">Main</div>
+        <a href="employee_dashboard.php" class="nav-link active"><i class="fas fa-house"></i> Dashboard</a>
+        <a href="attendance.php"         class="nav-link"><i class="fas fa-clock"></i> Attendance</a>
+        <a href="payslip.php"            class="nav-link"><i class="fas fa-file-invoice-dollar"></i> My Payslip</a>
+        <a href="leave_request.php"      class="nav-link"><i class="fas fa-calendar-alt"></i> Leave Requests</a>
+        <a href="my_deliveries.php"      class="nav-link"><i class="fas fa-truck"></i> My Deliveries</a>
+        <a href="profile.php"            class="nav-link"><i class="fas fa-user"></i> My Profile</a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <a href="../logout.php" class="nav-link danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </div>
+</aside>
+
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ── MAIN ── -->
+<main class="main-content">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="d-flex align-items-center gap-3">
+            <button class="mobile-toggle" id="mobileToggle"><i class="fas fa-bars"></i></button>
+            <div class="topbar-left">
+                <h4><?php echo $greeting;?>, <?php echo htmlspecialchars($firstName);?>!</h4>
+                <p>Welcome back to your employee portal</p>
             </div>
         </div>
 
-        <!-- Welcome Card -->
-        <div class="card border-0 shadow-sm mb-4" style="background: linear-gradient(135deg, #0077B6 0%, #023E8A 100%); color: white;">
-            <div class="card-body p-4">
-                <div class="d-flex align-items-center justify-content-between">
-                    <div>
-                        <h5 class="fw-bold mb-2">Welcome to De Chavez Waterhaus!</h5>
-                        <p class="mb-0 opacity-90">You're doing great work delivering clean water to our customers. Keep it up!</p>
+        <div class="topbar-right">
+            <!-- Notifications -->
+            <div class="dropdown">
+                <button class="topbar-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fas fa-bell"></i>
+                    <?php if($notifCount>0): ?><span class="topbar-notif-badge"><?php echo min($notifCount,9).($notifCount>9?'+':'');?></span><?php endif; ?>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" style="min-width:300px;max-height:360px;overflow-y:auto;">
+                    <li style="padding:12px 16px 8px;font-size:0.7rem;letter-spacing:0.15em;text-transform:uppercase;color:rgba(202,240,248,0.3);">Notifications</li>
+                    <?php
+                    $notifs = $conn->query("SELECT * FROM notifications WHERE userID = $userID ORDER BY created_at DESC LIMIT 5");
+                    if($notifs->num_rows > 0):
+                        while($n = $notifs->fetch_assoc()):
+                    ?>
+                        <li>
+                            <a class="dropdown-item" href="notifications.php" style="font-size:0.83rem;white-space:normal;padding:10px 14px !important;">
+                                <div style="display:flex;gap:10px;">
+                                    <i class="fas fa-bell" style="color:var(--aqua);margin-top:2px;flex-shrink:0;font-size:0.8rem;"></i>
+                                    <div>
+                                        <div><?php echo htmlspecialchars(mb_strimwidth($n['message'],0,70,'…'));?></div>
+                                        <div style="font-size:0.7rem;color:rgba(202,240,248,0.3);margin-top:2px;"><?php echo date('M j, g:i A', strtotime($n['created_at']));?></div>
+                                    </div>
+                                </div>
+                            </a>
+                        </li>
+                    <?php endwhile; else: ?>
+                        <li><span class="dropdown-item" style="color:rgba(202,240,248,0.35);font-size:0.83rem;">You're all caught up!</span></li>
+                    <?php endif; ?>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="notifications.php" style="text-align:center;font-size:0.8rem;color:var(--aqua);">View All Notifications</a></li>
+                </ul>
+            </div>
+
+            <!-- Avatar -->
+            <div class="dropdown">
+                <div class="avatar-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <div class="avatar-circle">
+                        <?php if(!empty($employee['profile_picture'])&&file_exists('../'.$employee['profile_picture'])): ?>
+                            <img src="../<?php echo htmlspecialchars($employee['profile_picture']);?>" alt="">
+                        <?php else: ?>
+                            <?php echo strtoupper(substr($userName,0,1));?>
+                        <?php endif; ?>
                     </div>
                     <div class="d-none d-md-block">
-                        <i class="fas fa-tint fa-4x opacity-50"></i>
+                        <div class="avatar-name"><?php echo htmlspecialchars($userName);?></div>
+                        <div class="avatar-role">Employee</div>
                     </div>
+                    <i class="fas fa-chevron-down fa-xs ms-1" style="color:rgba(202,240,248,0.3);"></i>
+                </div>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Welcome Banner -->
+    <div class="welcome-banner">
+        <div class="row align-items-center">
+            <div class="col-md-8" style="position:relative;z-index:1;">
+                <div class="welcome-title">Welcome back, <?php echo htmlspecialchars($firstName);?>!</div>
+                <div class="welcome-sub">You're doing great work delivering clean water to our customers. Keep it up!</div>
+
+                <?php if($isClockedIn): ?>
+                    <div class="status-orb orb-active">
+                        <span class="orb-dot"></span>
+                        On Duty · Clocked in at <?php echo date('g:i A', strtotime($currentShift['clock_in']));?>
+                    </div>
+                <?php elseif($hasCompletedToday): ?>
+                    <div class="status-orb orb-complete">
+                        <i class="fas fa-check-circle" style="font-size:0.75rem;"></i>
+                        Shift Completed for Today
+                    </div>
+                <?php else: ?>
+                    <div class="status-orb orb-idle">
+                        <i class="fas fa-moon" style="font-size:0.75rem;"></i>
+                        Not Clocked In
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="col-md-4 text-md-end mt-3 mt-md-0" style="position:relative;z-index:1;">
+                <i class="fas fa-droplet" style="font-size:4rem;color:rgba(0,180,216,0.15);"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="stat-card">
+                <div class="stat-icon si-blue"><i class="fas fa-truck"></i></div>
+                <div>
+                    <div class="stat-num"><?php echo $assignedOrders;?></div>
+                    <div class="stat-lbl">Assigned Orders</div>
                 </div>
             </div>
         </div>
+        <div class="col-6 col-lg-3">
+            <div class="stat-card">
+                <div class="stat-icon si-green"><i class="fas fa-check-circle"></i></div>
+                <div>
+                    <div class="stat-num"><?php echo $completedDeliveries;?></div>
+                    <div class="stat-lbl">Completed</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="stat-card">
+                <div class="stat-icon si-gold"><i class="fas fa-hourglass-half"></i></div>
+                <div>
+                    <div class="stat-num"><?php echo number_format($totalHoursMonth,1);?></div>
+                    <div class="stat-lbl">Hours This Month</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="stat-card">
+                <div class="stat-icon si-violet"><i class="fas fa-peso-sign"></i></div>
+                <div>
+                    <div class="stat-num" style="font-size:1.5rem;">₱<?php echo number_format($totalHoursMonth*$hourlyRate,0);?></div>
+                    <div class="stat-lbl">Est. Earnings</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        <!-- Stats Cards -->
-        <div class="row g-4 mb-4">
-            <div class="col-md-4">
-                <div class="stat-card">
-                    <div class="d-flex align-items-center">
-                        <div class="stat-icon bg-primary text-white me-3">
-                            <i class="fas fa-truck"></i>
-                        </div>
-                        <div>
-                            <div class="text-muted small">Assigned Orders</div>
-                            <div class="fw-bold fs-3"><?php echo $assignedOrders; ?></div>
-                        </div>
+    <!-- Bottom Row -->
+    <div class="row g-4">
+
+        <!-- Today's Status Card -->
+        <div class="col-lg-4">
+            <div class="today-card">
+                <div class="today-card-title">Today's Status</div>
+
+                <div class="text-center mb-4">
+                    <div class="clock-mini">
+                        <span id="clockH">--</span>:<span id="clockM">--</span>:<span id="clockS">--</span>
+                        <span class="ampm" id="clockAMPM">--</span>
                     </div>
+                    <div style="font-size:0.78rem;color:rgba(202,240,248,0.35);margin-top:6px;"><?php echo date('l, F j, Y');?></div>
                 </div>
-            </div>
-            <div class="col-md-4">
-                <div class="stat-card">
-                    <div class="d-flex align-items-center">
-                        <div class="stat-icon bg-success text-white me-3">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <div>
-                            <div class="text-muted small">Completed Deliveries</div>
-                            <div class="fw-bold fs-3"><?php echo $completedDeliveries; ?></div>
-                        </div>
+
+                <div class="today-info-row">
+                    <span class="today-info-label">Clock In</span>
+                    <span class="today-info-value">
+                        <?php echo $isClockedIn ? date('g:i A', strtotime($currentShift['clock_in'])) : ($hasCompletedToday ? '✓ Done' : '—');?>
+                    </span>
+                </div>
+                <div class="today-info-row">
+                    <span class="today-info-label">Status</span>
+                    <span class="today-info-value" style="color:<?php echo $isClockedIn ? 'var(--green)' : ($hasCompletedToday ? 'var(--violet)' : 'rgba(202,240,248,0.35)');?>">
+                        <?php echo $isClockedIn ? 'On Duty' : ($hasCompletedToday ? 'Shift Complete' : 'Not Clocked In');?>
+                    </span>
+                </div>
+                <div class="today-info-row">
+                    <span class="today-info-label">Hourly Rate</span>
+                    <span class="today-info-value" style="color:var(--gold);">₱<?php echo number_format($hourlyRate,2);?>/hr</span>
+                </div>
+
+                <?php if($isClockedIn): ?>
+                    <form method="POST">
+                        <button type="submit" name="clock_out_dash" class="btn-quick-clock btn-qc-out">
+                            <i class="fas fa-sign-out-alt"></i> Clock Out
+                        </button>
+                    </form>
+                <?php elseif($hasCompletedToday): ?>
+                    <div class="btn-quick-clock btn-qc-done">
+                        <i class="fas fa-moon"></i> Duty Completed
                     </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="stat-card">
-                    <div class="d-flex align-items-center">
-                        <div class="stat-icon bg-info text-white me-3">
-                            <i class="fas fa-star"></i>
-                        </div>
-                        <div>
-                            <div class="text-muted small">Performance</div>
-                            <div class="fw-bold fs-3">Excellent</div>
-                        </div>
-                    </div>
-                </div>
+                <?php else: ?>
+                    <a href="attendance.php" class="btn-quick-clock btn-qc-in">
+                        <i class="fas fa-sign-in-alt"></i> Go to Clock In
+                    </a>
+                <?php endif; ?>
             </div>
         </div>
 
         <!-- Quick Actions -->
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white border-0 py-3">
-                <h6 class="fw-bold mb-0">Quick Actions</h6>
-            </div>
-            <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <a href="attendance.php" class="btn btn-outline-primary w-100 py-3 rounded-3">
-                            <i class="fas fa-clock fa-2x mb-2 d-block"></i>
-                            <span>Clock In/Out</span>
-                        </a>
-                    </div>
-                    <div class="col-md-3">
-                        <a href="my_deliveries.php" class="btn btn-outline-primary w-100 py-3 rounded-3">
-                            <i class="fas fa-truck fa-2x mb-2 d-block"></i>
-                            <span>View My Deliveries</span>
-                        </a>
-                    </div>
-                    <div class="col-md-3">
-                        <button class="btn btn-outline-primary w-100 py-3 rounded-3" data-bs-toggle="modal" data-bs-target="#uploadPhotoModal">
-                            <i class="fas fa-camera fa-2x mb-2 d-block"></i>
-                            <span>Upload Photo</span>
-                        </button>
-                    </div>
-                    <div class="col-md-3">
-                        <a href="../logout.php" class="btn btn-outline-danger w-100 py-3 rounded-3">
-                            <i class="fas fa-sign-out-alt fa-2x mb-2 d-block"></i>
-                            <span>Logout</span>
-                        </a>
-                    </div>
+        <div class="col-lg-8">
+            <div style="background:linear-gradient(145deg,rgba(10,45,74,0.55),rgba(3,15,30,0.78));border:1px solid var(--glass-border);border-radius:18px;padding:26px;">
+                <div style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:500;color:var(--white);margin-bottom:18px;">Quick Actions</div>
+
+                <div class="qa-grid">
+                    <a href="attendance.php" class="qa-btn">
+                        <div class="qa-icon"><i class="fas fa-clock"></i></div>
+                        <div>
+                            <div class="qa-label">Attendance</div>
+                            <div class="qa-sub">Clock in / out for today</div>
+                        </div>
+                        <i class="fas fa-chevron-right qa-arrow"></i>
+                    </a>
+
+                    <a href="my_deliveries.php" class="qa-btn">
+                        <div class="qa-icon"><i class="fas fa-truck"></i></div>
+                        <div>
+                            <div class="qa-label">My Deliveries</div>
+                            <div class="qa-sub">View assigned orders</div>
+                        </div>
+                        <i class="fas fa-chevron-right qa-arrow"></i>
+                    </a>
+
+                    <a href="payslip.php" class="qa-btn">
+                        <div class="qa-icon gold"><i class="fas fa-file-invoice-dollar"></i></div>
+                        <div>
+                            <div class="qa-label">My Payslip</div>
+                            <div class="qa-sub">View earnings & deductions</div>
+                        </div>
+                        <i class="fas fa-chevron-right qa-arrow"></i>
+                    </a>
+
+                    <a href="leave_request.php" class="qa-btn">
+                        <div class="qa-icon violet"><i class="fas fa-calendar-alt"></i></div>
+                        <div>
+                            <div class="qa-label">Leave Requests</div>
+                            <div class="qa-sub">File or view leave status</div>
+                        </div>
+                        <i class="fas fa-chevron-right qa-arrow"></i>
+                    </a>
+
+                    <button class="qa-btn" data-bs-toggle="modal" data-bs-target="#uploadPhotoModal">
+                        <div class="qa-icon"><i class="fas fa-camera"></i></div>
+                        <div>
+                            <div class="qa-label">Update Photo</div>
+                            <div class="qa-sub">Change profile picture</div>
+                        </div>
+                        <i class="fas fa-chevron-right qa-arrow"></i>
+                    </button>
+
+                    <a href="../logout.php" class="qa-btn">
+                        <div class="qa-icon red"><i class="fas fa-sign-out-alt"></i></div>
+                        <div>
+                            <div class="qa-label">Logout</div>
+                            <div class="qa-sub">End your session</div>
+                        </div>
+                        <i class="fas fa-chevron-right qa-arrow"></i>
+                    </a>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Upload Photo Modal -->
-    <div class="modal fade" id="uploadPhotoModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
+    </div>
+</main>
+
+<!-- ── UPLOAD PHOTO MODAL ── -->
+<div class="modal fade" id="uploadPhotoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" enctype="multipart/form-data">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold">Upload Profile Picture</h5>
+                    <h5 class="modal-title"><i class="fas fa-camera me-2" style="color:var(--aqua);"></i>Update Profile Photo</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST" enctype="multipart/form-data">
-                    <div class="modal-body p-4">
-                        <div class="text-center mb-3">
-                            <?php if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])): ?>
-                                <img src="../<?php echo $employee['profile_picture']; ?>" alt="Current" style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover; border: 4px solid #f0f0f0;">
-                            <?php else: ?>
-                                <div class="bg-light rounded-circle d-inline-flex align-items-center justify-content-center" style="width: 120px; height: 120px;">
-                                    <i class="fas fa-user fa-4x text-muted"></i>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">Select New Photo</label>
-                            <input type="file" class="form-control" name="profile_picture" accept="image/*" required>
-                            <small class="text-muted">Allowed: JPG, PNG, GIF (Max 2MB)</small>
-                        </div>
+                <div class="modal-body">
+                    <div class="text-center mb-4">
+                        <?php if(!empty($employee['profile_picture'])&&file_exists('../'.$employee['profile_picture'])): ?>
+                            <img src="../<?php echo htmlspecialchars($employee['profile_picture']);?>" class="avatar-preview" alt="">
+                        <?php else: ?>
+                            <div class="avatar-initial-lg"><?php echo strtoupper(substr($userName,0,1));?></div>
+                        <?php endif; ?>
+                        <div style="font-size:0.75rem;color:rgba(202,240,248,0.35);margin-top:10px;">Current profile picture</div>
                     </div>
-                    <div class="modal-footer border-0 p-4 pt-0">
-                        <button type="button" class="btn btn-light px-4" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" name="upload_photo" class="btn btn-primary px-5">Upload Photo</button>
+
+                    <div>
+                        <label class="field-label">Select New Photo</label>
+                        <input type="file" class="field-input" name="profile_picture" accept="image/*" required style="padding:10px;">
+                        <div style="font-size:0.72rem;color:rgba(202,240,248,0.3);margin-top:6px;">Allowed: JPG, PNG, GIF · Max 2MB</div>
                     </div>
-                </form>
-            </div>
+                </div>
+                <div class="modal-footer d-flex gap-2 justify-content-end">
+                    <button type="button" class="btn-glass" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" name="upload_photo" class="btn-submit">
+                        <i class="fas fa-upload me-2"></i>Upload Photo
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Mobile Sidebar Toggle
-        const sidebar = document.getElementById('sidebar');
-        const mobileToggle = document.getElementById('mobileToggle');
-        
-        if (mobileToggle) {
-            mobileToggle.addEventListener('click', () => sidebar.classList.toggle('show'));
-        }
-        
-        // Auto collapse on mobile
-        if (window.innerWidth < 992 && sidebar) {
-            sidebar.classList.add('collapsed');
-        }
-    </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // ── SIDEBAR ──
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const toggle  = document.getElementById('mobileToggle');
+    function openSidebar()  { sidebar.classList.add('show'); overlay.classList.add('show'); }
+    function closeSidebar() { sidebar.classList.remove('show'); overlay.classList.remove('show'); }
+    if(toggle)  toggle.addEventListener('click', openSidebar);
+    if(overlay) overlay.addEventListener('click', closeSidebar);
+    sidebar.querySelectorAll('.nav-link').forEach(l => l.addEventListener('click', () => { if(window.innerWidth<992) closeSidebar(); }));
+
+    // ── LIVE CLOCK ──
+    function updateClock() {
+        const now  = new Date();
+        let h      = now.getHours();
+        const m    = String(now.getMinutes()).padStart(2,'0');
+        const s    = String(now.getSeconds()).padStart(2,'0');
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        document.getElementById('clockH').textContent    = h;
+        document.getElementById('clockM').textContent    = m;
+        document.getElementById('clockS').textContent    = s;
+        document.getElementById('clockAMPM').textContent = ampm;
+    }
+
+    setInterval(updateClock, 1000);
+    updateClock();
+</script>
 </body>
 </html>

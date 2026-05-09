@@ -7,7 +7,7 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'employee') {
     exit();
 }
 
-$userID = $_SESSION['userID'];
+$userID   = $_SESSION['userID'];
 $userName = $_SESSION['userName'];
 
 // Fetch employee data
@@ -17,396 +17,598 @@ $stmt->execute();
 $employee = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// Fetch ALL payslips (history)
-$payslipsStmt = $conn->prepare("
-    SELECT * FROM payroll 
-    WHERE userID = ? 
-    ORDER BY created_at DESC
-");
+// Fetch ALL payslips
+$payslipsStmt = $conn->prepare("SELECT * FROM payroll WHERE userID = ? ORDER BY created_at DESC");
 $payslipsStmt->bind_param("i", $userID);
 $payslipsStmt->execute();
 $payslipsResult = $payslipsStmt->get_result();
 $payslips = [];
-while ($row = $payslipsResult->fetch_assoc()) {
-    $payslips[] = $row;
-}
+while ($row = $payslipsResult->fetch_assoc()) $payslips[] = $row;
 $payslipsStmt->close();
 
-// Get the latest payslip for display
 $payroll = !empty($payslips) ? $payslips[0] : null;
 
-// Handle flash messages
+// Flash messages
 $flashMessage = $_SESSION['flash_message'] ?? null;
-$flashType = $_SESSION['flash_type'] ?? 'info';
-if ($flashMessage) {
-    unset($_SESSION['flash_message']);
-    unset($_SESSION['flash_type']);
-}
+$flashType    = $_SESSION['flash_type']    ?? 'info';
+if ($flashMessage) { unset($_SESSION['flash_message'], $_SESSION['flash_type']); }
 
 if (!$payroll) {
     $_SESSION['flash_message'] = "No payroll record found. Please contact admin.";
-    $_SESSION['flash_type'] = "error";
+    $_SESSION['flash_type']    = "error";
     header("Location: employee_dashboard.php");
     exit();
 }
 
-// Handle Print Request
-if (isset($_GET['print']) && $_GET['print'] == '1') {
-    // Page will auto-trigger print via JavaScript
+// Get the payslip to display
+$displayPayroll = $payroll;
+if (isset($_GET['view'])) {
+    foreach ($payslips as $p) {
+        if ($p['payrollID'] == $_GET['view']) { $displayPayroll = $p; break; }
+    }
 }
-?>
 
+$notifCount = $conn->query("SELECT COUNT(*) as unread FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['unread'] ?? 0;
+$firstName  = explode(' ', $userName)[0];
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Payslip • Employee</title>
+    <title>My Payslip • De Chavez Waterhaus</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
-        :root { --primary: #0077B6; --primary-dark: #023E8A; }
-        body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
-        
-        .sidebar { 
-            position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
-            background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
-            transition: all 0.3s ease; 
-            display: flex;
-            flex-direction: column;
+        :root {
+            --deep:  #020d18;  --abyss: #030f1e;  --ocean: #041e35;  --navy:  #0a2d4a;
+            --teal:  #0077b6;  --aqua:  #00b4d8;  --cyan:  #48cae4;  --glow:  #90e0ef;
+            --foam:  #caf0f8;  --white: #f0f9ff;  --gold:  #f4c842;
+            --green: #4ade80;  --red: #f87171;
+            --glass: rgba(0,180,216,0.08);  --glass-border: rgba(72,202,228,0.18);
+            --sidebar-w: 260px;
         }
-        .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
-        .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
-        .sidebar .nav-link { 
-            color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; 
-            font-weight: 500; transition: all 0.3s ease; border-radius: 12px; margin: 4px 10px;
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'DM Sans', sans-serif; background: var(--deep); color: var(--white); min-height: 100vh; }
+
+        /* ── SIDEBAR ── */
+        .sidebar { position: fixed; top: 0; left: 0; height: 100vh; width: var(--sidebar-w); background: var(--abyss); border-right: 1px solid var(--glass-border); z-index: 1000; display: flex; flex-direction: column; transition: transform 0.3s ease; }
+        .sidebar-logo { padding: 24px 22px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--glass-border); flex-shrink: 0; }
+        .sidebar-logo img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(0,180,216,0.35); box-shadow: 0 0 14px rgba(0,180,216,0.2); }
+        .sidebar-logo-text { font-family: 'Cormorant Garamond', serif; font-size: 1.05rem; font-weight: 500; color: var(--white); line-height: 1.2; }
+        .sidebar-logo-sub { font-size: 0.68rem; color: rgba(202,240,248,0.3); letter-spacing: 0.1em; text-transform: uppercase; }
+        .sidebar-nav { flex: 1; overflow-y: auto; padding: 16px 12px 16px; scrollbar-width: thin; scrollbar-color: rgba(72,202,228,0.15) transparent; }
+        .sidebar-nav::-webkit-scrollbar { width: 4px; }
+        .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(72,202,228,0.15); border-radius: 2px; }
+        .nav-section-label { font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(202,240,248,0.25); padding: 16px 12px 6px; }
+        .nav-link { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px; color: rgba(202,240,248,0.5) !important; text-decoration: none; font-size: 0.87rem; font-weight: 500; transition: all 0.25s ease; margin-bottom: 2px; position: relative; }
+        .nav-link i { width: 18px; text-align: center; font-size: 0.9rem; color: rgba(0,180,216,0.4); transition: color 0.25s; }
+        .nav-link:hover { background: var(--glass); color: var(--foam) !important; }
+        .nav-link:hover i { color: var(--aqua); }
+        .nav-link.active { background: linear-gradient(135deg, rgba(0,119,182,0.25), rgba(0,180,216,0.12)); border: 1px solid rgba(0,180,216,0.2); color: var(--aqua) !important; }
+        .nav-link.active i { color: var(--aqua); }
+        .nav-link.active::before { content: ''; position: absolute; left: 0; top: 20%; bottom: 20%; width: 3px; background: var(--aqua); border-radius: 0 3px 3px 0; }
+        .nav-link.danger { color: rgba(252,165,165,0.6) !important; }
+        .nav-link.danger i { color: rgba(252,165,165,0.5); }
+        .nav-link.danger:hover { background: rgba(248,113,113,0.08); color: #fca5a5 !important; }
+        .sidebar-footer { padding: 14px 12px; border-top: 1px solid var(--glass-border); flex-shrink: 0; }
+
+        /* ── MAIN ── */
+        .main-content { margin-left: var(--sidebar-w); min-height: 100vh; padding: 28px 32px; }
+
+        /* ── TOP BAR ── */
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+        .topbar-left h4 { font-family: 'Cormorant Garamond', serif; font-size: 1.7rem; font-weight: 400; color: var(--white); line-height: 1.1; }
+        .topbar-left p { font-size: 0.82rem; color: rgba(202,240,248,0.4); margin-top: 2px; }
+        .topbar-right { display: flex; align-items: center; gap: 12px; }
+        .topbar-btn { width: 42px; height: 42px; border-radius: 50%; background: var(--glass); border: 1px solid var(--glass-border); color: rgba(202,240,248,0.6); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; text-decoration: none; transition: all 0.3s; position: relative; cursor: pointer; }
+        .topbar-btn:hover { background: rgba(0,180,216,0.15); border-color: var(--aqua); color: var(--aqua); }
+        .topbar-notif-badge { position: absolute; top: -3px; right: -3px; background: var(--gold); color: var(--deep); font-size: 0.58rem; font-weight: 700; min-width: 16px; height: 16px; border-radius: 50px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+        .avatar-btn { display: flex; align-items: center; gap: 10px; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 50px; padding: 6px 14px 6px 6px; cursor: pointer; transition: all 0.3s; }
+        .avatar-btn:hover { border-color: rgba(0,180,216,0.35); background: rgba(0,180,216,0.1); }
+        .avatar-circle { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+        .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-name { font-size: 0.82rem; font-weight: 500; color: var(--white); }
+        .avatar-role { font-size: 0.7rem; color: rgba(202,240,248,0.4); }
+        .dropdown-menu { background: var(--ocean) !important; border: 1px solid var(--glass-border) !important; border-radius: 14px !important; padding: 8px !important; box-shadow: 0 20px 50px rgba(0,0,0,0.5) !important; }
+        .dropdown-item { color: rgba(202,240,248,0.65) !important; border-radius: 8px !important; padding: 9px 14px !important; font-size: 0.84rem !important; transition: all 0.2s !important; }
+        .dropdown-item:hover { background: var(--glass) !important; color: var(--aqua) !important; }
+        .dropdown-item.text-danger { color: rgba(252,165,165,0.7) !important; }
+        .dropdown-item.text-danger:hover { background: rgba(248,113,113,0.08) !important; color: #fca5a5 !important; }
+        .dropdown-divider { border-color: var(--glass-border) !important; margin: 4px 0 !important; }
+
+        /* ── HISTORY PANEL ── */
+        .history-panel {
+            background: linear-gradient(145deg, rgba(10,45,74,0.55), rgba(3,15,30,0.78));
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            overflow: hidden;
+            height: 100%;
+            display: flex; flex-direction: column;
         }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { 
-            background-color: #f0f7ff; color: var(--primary); 
+
+        .history-panel-head {
+            padding: 20px 22px;
+            border-bottom: 1px solid var(--glass-border);
+            display: flex; justify-content: space-between; align-items: center;
         }
-        .sidebar .nav-link i { width: 22px; font-size: 1.1rem; }
-        
-        .main-content { margin-left: 260px; padding: 30px; transition: margin-left 0.3s ease; }
-        
-        .nav-menu { flex: 1; overflow-y: auto; padding-bottom: 20px; }
-        .logout-section { padding: 15px 10px; border-top: 1px solid #eee; background: white; }
-        
-        @media (max-width: 991.98px) {
-            .main-content { margin-left: 0; padding: 20px; }
-            .sidebar { transform: translateX(-100%); }
-            .sidebar.show { transform: translateX(0); }
+
+        .hp-title { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-weight: 500; color: var(--white); }
+        .hp-count { font-size: 0.72rem; color: rgba(202,240,248,0.35); }
+
+        .history-list { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(72,202,228,0.1) transparent; }
+        .history-list::-webkit-scrollbar { width: 3px; }
+        .history-list::-webkit-scrollbar-thumb { background: rgba(72,202,228,0.1); border-radius: 2px; }
+
+        .history-item {
+            display: block;
+            padding: 14px 20px;
+            border-bottom: 1px solid rgba(72,202,228,0.06);
+            text-decoration: none;
+            transition: all 0.2s;
+            position: relative;
         }
-        
-        .payslip-card { 
-            background: white; 
-            border-radius: 20px; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+
+        .history-item:hover { background: rgba(0,180,216,0.05); }
+
+        .history-item.selected {
+            background: linear-gradient(135deg, rgba(0,119,182,0.2), rgba(0,180,216,0.08));
+            border-left: 3px solid var(--aqua);
         }
-        .payslip-header { 
-            background: linear-gradient(135deg, #0077B6 0%, #023E8A 100%); 
-            color: white; 
-            padding: 25px; 
-            border-radius: 20px 20px 0 0;
+
+        .hi-period { font-size: 0.88rem; font-weight: 500; color: var(--white); margin-bottom: 3px; }
+        .history-item.selected .hi-period { color: var(--aqua); }
+        .hi-dates  { font-size: 0.73rem; color: rgba(202,240,248,0.38); }
+        .hi-net    { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-weight: 600; color: var(--green); }
+
+        .hi-status { padding: 2px 9px; border-radius: 50px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em; }
+        .hs-Paid    { background: rgba(74,222,128,0.1);  color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+        .hs-Pending { background: rgba(244,200,66,0.1);  color: var(--gold);  border: 1px solid rgba(244,200,66,0.25); }
+
+        /* ── PAYSLIP CARD ── */
+        .payslip-card {
+            background: linear-gradient(145deg, rgba(10,45,74,0.5), rgba(3,15,30,0.78));
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            overflow: hidden;
+        }
+
+        /* payslip header */
+        .ps-head {
+            background: linear-gradient(135deg, rgba(0,119,182,0.4), rgba(0,180,216,0.2));
+            border-bottom: 1px solid rgba(0,180,216,0.2);
+            padding: 30px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ps-head::before { content: ''; position: absolute; top: -60px; right: -60px; width: 180px; height: 180px; border-radius: 50%; background: rgba(0,180,216,0.08); }
+        .ps-head::after  { content: ''; position: absolute; bottom: -40px; left: 40px; width: 100px; height: 100px; border-radius: 50%; background: rgba(0,119,182,0.08); }
+
+        .ps-company-name { font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; font-weight: 500; color: var(--white); letter-spacing: 0.05em; position: relative; z-index: 1; }
+        .ps-company-sub  { font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(202,240,248,0.45); margin-top: 2px; position: relative; z-index: 1; }
+        .ps-period       { font-size: 0.82rem; color: rgba(202,240,248,0.5); margin-top: 8px; position: relative; z-index: 1; }
+
+        .ps-net-badge {
+            background: rgba(74,222,128,0.15);
+            border: 1px solid rgba(74,222,128,0.3);
+            border-radius: 14px;
+            padding: 12px 20px;
             text-align: center;
+            position: relative; z-index: 1;
         }
-        .amount { font-size: 1.8rem; font-weight: 700; }
-        
-        .payslip-history-item {
-            transition: all 0.2s ease;
-            border-left: 4px solid transparent;
+
+        .ps-net-label { font-size: 0.68rem; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(74,222,128,0.6); margin-bottom: 4px; }
+        .ps-net-value { font-family: 'Cormorant Garamond', serif; font-size: 2.2rem; font-weight: 600; color: var(--green); line-height: 1; }
+
+        /* employee info bar */
+        .ps-employee-bar {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            padding: 20px 28px;
+            border-bottom: 1px solid rgba(72,202,228,0.08);
+            flex-wrap: wrap; gap: 16px;
         }
-        .payslip-history-item:hover {
-            background-color: #f8f9fa;
-            border-left-color: #0077B6;
+
+        .ps-emp-label { font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(202,240,248,0.3); margin-bottom: 4px; }
+        .ps-emp-value { font-size: 0.92rem; color: var(--white); font-weight: 500; }
+
+        /* breakdown */
+        .ps-breakdown { padding: 24px 28px; }
+
+        .ps-section-label {
+            font-size: 0.68rem; letter-spacing: 0.18em; text-transform: uppercase;
+            color: var(--aqua); margin-bottom: 14px;
+            display: flex; align-items: center; gap: 10px;
         }
-        .payslip-history-item.active {
-            background-color: #e8f4ff;
-            border-left-color: #0077B6;
+
+        .ps-section-label::after { content: ''; flex: 1; height: 1px; background: rgba(0,180,216,0.15); }
+
+        .ps-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 11px 0;
+            border-bottom: 1px solid rgba(72,202,228,0.06);
         }
-        
-        /* Print Styles */
+
+        .ps-row:last-child { border-bottom: none; }
+
+        .ps-row-label { font-size: 0.87rem; color: rgba(202,240,248,0.6); }
+        .ps-row-value { font-size: 0.9rem; font-weight: 500; color: var(--foam); }
+        .ps-row-value.positive { color: var(--green); }
+        .ps-row-value.negative { color: var(--red); }
+        .ps-row-value.highlight { font-family: 'Cormorant Garamond', serif; font-size: 1.2rem; font-weight: 600; color: var(--aqua); }
+
+        /* divider before total */
+        .ps-total-divider { border: none; border-top: 1px solid rgba(72,202,228,0.18); margin: 8px 0; }
+
+        .ps-total-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 0 0;
+        }
+
+        .ps-total-label { font-family: 'Cormorant Garamond', serif; font-size: 1.2rem; font-weight: 500; color: var(--white); }
+        .ps-total-value { font-family: 'Cormorant Garamond', serif; font-size: 2rem; font-weight: 600; color: var(--green); }
+
+        /* status chip */
+        .ps-status-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 5px 14px; border-radius: 50px;
+            font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em;
+        }
+
+        .ps-footer {
+            padding: 16px 28px;
+            border-top: 1px solid rgba(72,202,228,0.08);
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 12px;
+        }
+
+        .ps-generated { font-size: 0.73rem; color: rgba(202,240,248,0.28); }
+
+        /* action buttons */
+        .btn-print {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 11px 24px;
+            background: linear-gradient(135deg, var(--teal), var(--aqua));
+            border: none; border-radius: 50px;
+            color: var(--deep); font-family: 'DM Sans', sans-serif;
+            font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+            cursor: pointer; transition: all 0.3s;
+            box-shadow: 0 5px 16px rgba(0,180,216,0.25);
+        }
+
+        .btn-print:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,180,216,0.45); }
+
+        .btn-back {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 20px;
+            background: var(--glass); border: 1px solid var(--glass-border);
+            color: var(--aqua); border-radius: 50px;
+            font-size: 0.82rem; font-weight: 600;
+            text-decoration: none; transition: all 0.3s;
+        }
+
+        .btn-back:hover { background: rgba(0,180,216,0.15); color: var(--foam); }
+
+        /* ── MOBILE ── */
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(2,13,24,0.7); z-index: 999; backdrop-filter: blur(3px); }
+        .mobile-toggle { background: var(--glass); border: 1px solid var(--glass-border); color: var(--aqua); width: 40px; height: 40px; border-radius: 10px; display: none; align-items: center; justify-content: center; cursor: pointer; font-size: 0.9rem; }
+
+        @media (max-width: 991px) {
+            .sidebar { transform: translateX(-100%); box-shadow: 4px 0 40px rgba(0,0,0,0.5); }
+            .sidebar.show { transform: translateX(0); }
+            .sidebar-overlay.show { display: block; }
+            .main-content { margin-left: 0; padding: 20px 18px; }
+            .mobile-toggle { display: flex; }
+        }
+
+        @media (max-width: 576px) {
+            .main-content { padding: 16px 14px; }
+            .ps-head { padding: 22px 20px; }
+            .ps-breakdown, .ps-employee-bar { padding: 18px 20px; }
+            .ps-footer { padding: 14px 20px; }
+        }
+
+        /* ── PRINT STYLES ── */
         @media print {
-            .sidebar, .btn, .d-grid, a[href] { display: none !important; }
-            .main-content { margin-left: 0 !important; padding: 0 !important; }
-            body { background: white !important; }
-            .payslip-card { 
-                box-shadow: none !important; 
-                border: 2px solid #0077B6 !important;
-                max-width: 100% !important;
-                margin: 0 !important;
+            .sidebar, .sidebar-overlay, .topbar, .history-panel, .mobile-toggle,
+            .btn-print, .btn-back, .ps-footer { display: none !important; }
+
+            .main-content { margin-left: 0 !important; padding: 0 !important; background: white !important; }
+            body { background: white !important; color: #1a1a1a !important; }
+
+            .payslip-card {
+                background: white !important;
+                border: 2px solid #0077b6 !important;
+                border-radius: 12px !important;
+                box-shadow: none !important;
             }
-            .payslip-header { 
-                background: #0077B6 !important; 
+
+            .ps-head {
+                background: #0077b6 !important;
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
             }
+
+            .ps-company-name, .ps-company-sub, .ps-period, .ps-employee-bar,
+            .ps-row-label, .ps-row-value, .ps-total-label { color: #1a1a1a !important; }
+
+            .ps-net-value, .ps-total-value { color: #15803d !important; }
+            .ps-row-value.negative { color: #dc2626 !important; }
+            .ps-section-label { color: #0077b6 !important; }
+            .ps-generated { display: block !important; color: #666 !important; }
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar -->
-    <div class="sidebar" id="sidebar">
-        <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
-            <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
-            <div>
-                <span class="fw-bold fs-5">De Chavez Waterhaus</span>
-                <small class="d-block text-muted">Employee Portal</small>
-            </div>
-        </div>
-        
-        <div class="nav-menu px-3 mt-2">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="employee_dashboard.php" class="nav-link"><i class="fas fa-tachometer-alt me-3"></i> <span>Dashboard</span></a></li>
-                <li class="nav-item"><a href="attendance.php" class="nav-link"><i class="fas fa-clock me-3"></i> <span>Attendance</span></a></li>
-                <li class="nav-item"><a href="payslip.php" class="nav-link active"><i class="fas fa-file-invoice-dollar me-3"></i> <span>My Payslip</span></a></li>
-                <li class="nav-item"><a href="leave_request.php" class="nav-link"><i class="fas fa-calendar-alt me-3"></i> <span>Leave Requests</span></a></li>
-                <li class="nav-item"><a href="my_deliveries.php" class="nav-link"><i class="fas fa-truck me-3"></i> <span>My Deliveries</span></a></li>
-                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>My Profile</span></a></li>
-            </ul>
-        </div>
-        
-        <div class="logout-section">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
-            </ul>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+        <img src="../images/logo.jpg" alt="Logo">
+        <div>
+            <div class="sidebar-logo-text">De Chavez Waterhaus</div>
+            <div class="sidebar-logo-sub">Employee Portal</div>
         </div>
     </div>
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">Main</div>
+        <a href="employee_dashboard.php" class="nav-link"><i class="fas fa-house"></i> Dashboard</a>
+        <a href="attendance.php"         class="nav-link"><i class="fas fa-clock"></i> Attendance</a>
+        <a href="payslip.php"            class="nav-link active"><i class="fas fa-file-invoice-dollar"></i> My Payslip</a>
+        <a href="leave_request.php"      class="nav-link"><i class="fas fa-calendar-alt"></i> Leave Requests</a>
+        <a href="my_deliveries.php"      class="nav-link"><i class="fas fa-truck"></i> My Deliveries</a>
+        <a href="profile.php"            class="nav-link"><i class="fas fa-user"></i> My Profile</a>
+    </nav>
+    <div class="sidebar-footer">
+        <a href="../logout.php" class="nav-link danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </div>
+</aside>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <!-- Flash Alert -->
-        <?php if ($flashMessage): ?>
-        <div class="alert alert-<?php echo $flashType === 'success' ? 'success' : ($flashType === 'error' ? 'danger' : ($flashType === 'warning' ? 'warning' : 'info')); ?> alert-dismissible fade show mb-4" role="alert" style="border-radius: 12px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-            <div class="d-flex align-items-center">
-                <i class="fas fa-<?php echo $flashType === 'success' ? 'check-circle' : ($flashType === 'error' ? 'exclamation-circle' : ($flashType === 'warning' ? 'exclamation-triangle' : 'info-circle')); ?> me-3 fa-lg"></i>
-                <div><?php echo htmlspecialchars($flashMessage); ?></div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ── MAIN ── -->
+<main class="main-content">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="d-flex align-items-center gap-3">
+            <button class="mobile-toggle" id="mobileToggle"><i class="fas fa-bars"></i></button>
+            <div class="topbar-left">
+                <h4>My Payslip</h4>
+                <p>View and print your payslip history</p>
             </div>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-        <?php endif; ?>
-        
-        <!-- Top Navbar -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div class="d-flex align-items-center">
-                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
-                    <i class="fas fa-bars"></i>
+
+        <div class="topbar-right">
+            <div class="dropdown">
+                <button class="topbar-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fas fa-bell"></i>
+                    <?php if($notifCount>0): ?><span class="topbar-notif-badge"><?php echo min($notifCount,9).($notifCount>9?'+':'');?></span><?php endif; ?>
                 </button>
-                <div>
-                    <h4 class="fw-bold mb-0">My Payslip</h4>
-                    <p class="text-muted mb-0">View and download your latest payslip</p>
-                </div>
+                <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px;max-height:340px;overflow-y:auto;">
+                    <li style="padding:12px 16px 8px;font-size:0.7rem;letter-spacing:0.15em;text-transform:uppercase;color:rgba(202,240,248,0.3);">Notifications</li>
+                    <?php
+                    $notifs = $conn->query("SELECT * FROM notifications WHERE userID = $userID ORDER BY created_at DESC LIMIT 5");
+                    if($notifs->num_rows > 0):
+                        while($n = $notifs->fetch_assoc()):
+                    ?>
+                        <li><a class="dropdown-item" href="notifications.php" style="font-size:0.83rem;white-space:normal;"><?php echo htmlspecialchars(mb_strimwidth($n['message'],0,70,'…'));?></a></li>
+                    <?php endwhile; else: ?>
+                        <li><span class="dropdown-item" style="color:rgba(202,240,248,0.35);font-size:0.83rem;">No notifications</span></li>
+                    <?php endif; ?>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="notifications.php" style="text-align:center;font-size:0.8rem;color:var(--aqua);">View All</a></li>
+                </ul>
             </div>
-            
-            <div class="d-flex align-items-center gap-3">
-                <!-- Notification Bell -->
-                <div class="dropdown">
-                    <button class="btn btn-light position-relative" data-bs-toggle="dropdown" style="width: 42px; height: 42px; border-radius: 12px;">
-                        <i class="fas fa-bell fa-lg"></i>
-                        <?php 
-                        $unreadCount = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE userID = $userID AND is_read = 0")->fetch_assoc()['count'] ?? 0;
-                        if ($unreadCount > 0): 
-                        ?>
-                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 9px; padding: 2px 6px;">
-                                <?php echo min($unreadCount, 9); ?><?php echo $unreadCount > 9 ? '+' : ''; ?>
-                            </span>
-                        <?php endif; ?>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow" style="width: 320px; max-height: 400px; overflow-y: auto;">
-                        <li class="dropdown-header fw-bold">Notifications</li>
-                        <?php 
-                        $notifs = $conn->query("SELECT * FROM notifications WHERE userID = $userID ORDER BY created_at DESC LIMIT 5");
-                        if ($notifs->num_rows > 0):
-                            while ($n = $notifs->fetch_assoc()):
-                        ?>
-                            <li><a class="dropdown-item small" href="notifications.php"><?php echo htmlspecialchars($n['message']); ?></a></li>
-                        <?php endwhile; else: ?>
-                            <li><span class="dropdown-item text-muted small">No new notifications</span></li>
-                        <?php endif; ?>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-center small text-primary" href="notifications.php">View All</a></li>
-                    </ul>
-                </div>
-                
-                <div class="dropdown">
-                    <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                        <?php if (!empty($employee['profile_picture']) && file_exists('../' . $employee['profile_picture'])): ?>
-                            <img src="../<?php echo $employee['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
+
+            <div class="dropdown">
+                <div class="avatar-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <div class="avatar-circle">
+                        <?php if(!empty($employee['profile_picture'])&&file_exists('../'.$employee['profile_picture'])): ?>
+                            <img src="../<?php echo htmlspecialchars($employee['profile_picture']);?>" alt="">
                         <?php else: ?>
-                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                                <span class="fw-bold fs-6"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
-                            </div>
+                            <?php echo strtoupper(substr($userName,0,1));?>
                         <?php endif; ?>
-                        <div class="text-start d-none d-md-block">
-                            <div class="fw-semibold"><?php echo htmlspecialchars($userName); ?></div>
-                            <small class="text-muted">Employee</small>
+                    </div>
+                    <div class="d-none d-md-block">
+                        <div class="avatar-name"><?php echo htmlspecialchars($userName);?></div>
+                        <div class="avatar-role">Employee</div>
+                    </div>
+                    <i class="fas fa-chevron-down fa-xs ms-1" style="color:rgba(202,240,248,0.3);"></i>
+                </div>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flash -->
+    <?php if($flashMessage): ?>
+    <div style="background:rgba(4,30,53,0.85);border:1px solid <?php echo $flashType==='success'?'rgba(74,222,128,0.3)':'rgba(248,113,113,0.3)';?>;border-radius:12px;padding:12px 18px;margin-bottom:20px;font-size:0.88rem;color:<?php echo $flashType==='success'?'#4ade80':'#fca5a5';?>;display:flex;align-items:center;gap:10px;">
+        <i class="fas fa-<?php echo $flashType==='success'?'check-circle':'exclamation-circle';?>"></i>
+        <?php echo htmlspecialchars($flashMessage);?>
+    </div>
+    <?php endif; ?>
+
+    <div class="row g-4" id="payslipView">
+
+        <!-- History Sidebar -->
+        <div class="col-lg-4">
+            <div class="history-panel">
+                <div class="history-panel-head">
+                    <div class="hp-title">Payslip History</div>
+                    <div class="hp-count"><?php echo count($payslips);?> record<?php echo count($payslips)!=1?'s':'';?></div>
+                </div>
+
+                <div class="history-list">
+                    <?php foreach($payslips as $i => $p):
+                        $isSelected = isset($_GET['view'])
+                            ? $_GET['view'] == $p['payrollID']
+                            : $i === 0;
+                        $statusClass = $p['status'] === 'Paid' ? 'hs-Paid' : 'hs-Pending';
+                    ?>
+                    <a href="?view=<?php echo $p['payrollID'];?>" class="history-item <?php echo $isSelected?'selected':'';?>">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                            <div>
+                                <div class="hi-period"><?php echo date('F Y', strtotime($p['period_end']));?></div>
+                                <div class="hi-dates">
+                                    <?php echo date('M d', strtotime($p['period_start']));?> – <?php echo date('M d, Y', strtotime($p['period_end']));?>
+                                </div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div class="hi-net">₱<?php echo number_format($p['net_pay'],0);?></div>
+                                <span class="hi-status <?php echo $statusClass;?>"><?php echo $p['status'];?></span>
+                            </div>
                         </div>
-                        <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow">
-                        <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
-                    </ul>
+                    </a>
+                    <?php endforeach; ?>
                 </div>
             </div>
         </div>
 
-        <div class="text-center mb-4">
-            <h4 class="fw-bold">My Payslips</h4>
-            <p class="text-muted">View your payslip history and print anytime</p>
-        </div>
-        
-        <?php if (empty($payslips)): ?>
-        <div class="card border-0 shadow-sm text-center py-5">
-            <div class="card-body">
-                <i class="fas fa-file-invoice-dollar fa-4x text-muted mb-3"></i>
-                <h5 class="fw-bold">No Payslips Yet</h5>
-                <p class="text-muted">Your payslips will appear here once payroll is processed.</p>
-                <a href="employee_dashboard.php" class="btn btn-primary">Back to Dashboard</a>
-            </div>
-        </div>
-        <?php else: ?>
-        
-        <div class="row g-4">
-            <!-- Payslip History Sidebar -->
-            <div class="col-lg-4">
-                <div class="card border-0 shadow-sm h-100">
-                    <div class="card-header bg-white border-0 py-3">
-                        <h6 class="fw-bold mb-0"><i class="fas fa-history me-2 text-primary"></i> Payslip History</h6>
-                        <small class="text-muted"><?php echo count($payslips); ?> record(s)</small>
-                    </div>
-                    <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
-                        <?php foreach ($payslips as $index => $p): ?>
-                        <a href="?view=<?php echo $p['payrollID']; ?>" class="d-block text-decoration-none payslip-history-item p-3 border-bottom <?php echo (isset($_GET['view']) && $_GET['view'] == $p['payrollID']) || (!isset($_GET['view']) && $index === 0) ? 'active' : ''; ?>">
-                            <div class="d-flex justify-content-between align-items-start">
+        <!-- Payslip Detail -->
+        <div class="col-lg-8" id="payslipDetail">
+            <div class="payslip-card">
+
+                <!-- Header -->
+                <div class="ps-head">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="d-flex align-items-center gap-3 mb-2" style="position:relative;z-index:1;">
+                                <img src="../images/logo.jpg" alt=""
+                                     style="width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);">
                                 <div>
-                                    <div class="fw-semibold text-dark"><?php echo date('M Y', strtotime($p['period_end'])); ?></div>
-                                    <small class="text-muted"><?php echo date('M d', strtotime($p['period_start'])); ?> - <?php echo date('M d, Y', strtotime($p['period_end'])); ?></small>
-                                </div>
-                                <div class="text-end">
-                                    <div class="fw-bold text-success">₱<?php echo number_format($p['net_pay'], 0); ?></div>
-                                    <span class="badge bg-<?php echo $p['status'] === 'Paid' ? 'success' : 'warning'; ?> small"><?php echo $p['status']; ?></span>
+                                    <div class="ps-company-name">De Chavez Waterhaus</div>
+                                    <div class="ps-company-sub">Official Payslip</div>
                                 </div>
                             </div>
+                            <div class="ps-period" style="position:relative;z-index:1;">
+                                Pay Period: <?php echo date('F d, Y', strtotime($displayPayroll['period_start']));?> –
+                                <?php echo date('F d, Y', strtotime($displayPayroll['period_end']));?>
+                            </div>
+                        </div>
+                        <div class="col-auto" style="position:relative;z-index:1;">
+                            <div class="ps-net-badge">
+                                <div class="ps-net-label">Net Pay</div>
+                                <div class="ps-net-value">₱<?php echo number_format($displayPayroll['net_pay'],2);?></div>
+                                <?php
+                                $sc = $displayPayroll['status'] === 'Paid' ? 'hs-Paid' : 'hs-Pending';
+                                ?>
+                                <div class="mt-2 text-center">
+                                    <span class="hi-status <?php echo $sc;?>"><?php echo $displayPayroll['status'];?></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Employee Info -->
+                <div class="ps-employee-bar">
+                    <div>
+                        <div class="ps-emp-label">Employee Name</div>
+                        <div class="ps-emp-value"><?php echo htmlspecialchars($employee['Firstname'].' '.$employee['Lastname']);?></div>
+                    </div>
+                    <div>
+                        <div class="ps-emp-label">Employee ID</div>
+                        <div class="ps-emp-value">#<?php echo str_pad($userID, 5, '0', STR_PAD_LEFT);?></div>
+                    </div>
+                    <div>
+                        <div class="ps-emp-label">Payslip ID</div>
+                        <div class="ps-emp-value">#<?php echo str_pad($displayPayroll['payrollID'], 6, '0', STR_PAD_LEFT);?></div>
+                    </div>
+                    <div>
+                        <div class="ps-emp-label">Pay Date</div>
+                        <div class="ps-emp-value"><?php echo date('M d, Y', strtotime($displayPayroll['created_at']));?></div>
+                    </div>
+                </div>
+
+                <!-- Breakdown -->
+                <div class="ps-breakdown">
+
+                    <!-- Earnings -->
+                    <div class="ps-section-label">Earnings</div>
+
+                    <div class="ps-row">
+                        <span class="ps-row-label"><i class="fas fa-clock me-2" style="color:rgba(0,180,216,0.4);font-size:0.8rem;"></i>Total Hours Worked</span>
+                        <span class="ps-row-value"><?php echo number_format($displayPayroll['total_hours'],2);?> hrs</span>
+                    </div>
+                    <div class="ps-row">
+                        <span class="ps-row-label"><i class="fas fa-peso-sign me-2" style="color:rgba(0,180,216,0.4);font-size:0.8rem;"></i>Hourly Rate</span>
+                        <span class="ps-row-value">₱<?php echo number_format($displayPayroll['hourly_rate'],2);?> / hr</span>
+                    </div>
+                    <div class="ps-row">
+                        <span class="ps-row-label" style="font-weight:600;color:var(--foam);">Gross Pay</span>
+                        <span class="ps-row-value positive" style="font-weight:700;">₱<?php echo number_format($displayPayroll['gross_pay'],2);?></span>
+                    </div>
+
+                    <!-- Deductions -->
+                    <div class="ps-section-label" style="margin-top:18px;">Deductions</div>
+
+                    <div class="ps-row">
+                        <span class="ps-row-label"><i class="fas fa-minus-circle me-2" style="color:rgba(248,113,113,0.5);font-size:0.8rem;"></i>SSS / PhilHealth / Pag-IBIG</span>
+                        <span class="ps-row-value negative">−₱<?php echo number_format($displayPayroll['deductions'],2);?></span>
+                    </div>
+
+                    <?php if(!empty($displayPayroll['notes'])): ?>
+                    <!-- Notes -->
+                    <div class="ps-section-label" style="margin-top:18px;">Notes</div>
+                    <div style="font-size:0.84rem;color:rgba(202,240,248,0.5);padding:10px 0;">
+                        <?php echo htmlspecialchars($displayPayroll['notes']);?>
+                    </div>
+                    <?php endif; ?>
+
+                    <!-- Total -->
+                    <hr class="ps-total-divider" style="margin-top:18px;">
+                    <div class="ps-total-row">
+                        <span class="ps-total-label">NET PAY</span>
+                        <span class="ps-total-value">₱<?php echo number_format($displayPayroll['net_pay'],2);?></span>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="ps-footer">
+                    <div class="ps-generated">
+                        Generated: <?php echo date('F d, Y', strtotime($displayPayroll['created_at']));?> ·
+                        This is a computer-generated document.
+                    </div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                        <a href="employee_dashboard.php" class="btn-back">
+                            <i class="fas fa-arrow-left"></i> Dashboard
                         </a>
-                        <?php endforeach; ?>
+                        <button class="btn-print" onclick="window.print()">
+                            <i class="fas fa-print"></i> Print
+                        </button>
                     </div>
                 </div>
-            </div>
-            
-            <!-- Payslip Detail View -->
-            <div class="col-lg-8">
-                <?php 
-                // Get the payslip to display (from URL or latest)
-                $displayPayroll = $payroll;
-                if (isset($_GET['view'])) {
-                    foreach ($payslips as $p) {
-                        if ($p['payrollID'] == $_GET['view']) {
-                            $displayPayroll = $p;
-                            break;
-                        }
-                    }
-                }
-                ?>
-                
-                <div class="payslip-card">
-                    <div class="payslip-header">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div>
-                                <i class="fas fa-file-invoice-dollar fa-2x"></i>
-                            </div>
-                            <div class="text-end">
-                                <span class="badge bg-light text-dark fs-6">₱<?php echo number_format($displayPayroll['net_pay'], 2); ?></span>
-                            </div>
-                        </div>
-                        <h5 class="fw-bold mb-1">DE CHAVEZ WATERHAUS</h5>
-                        <p class="mb-0 opacity-75">Official Payslip • <?php echo date('F Y', strtotime($displayPayroll['period_end'])); ?></p>
-                    </div>
-                    
-                    <div class="p-4">
-                        <div class="row mb-4">
-                            <div class="col-6">
-                                <div class="text-muted small">Employee</div>
-                                <div class="fw-bold"><?php echo htmlspecialchars($employee['Firstname'] . ' ' . $employee['Lastname']); ?></div>
-                            </div>
-                            <div class="col-6 text-end">
-                                <div class="text-muted small">Pay Period</div>
-                                <div class="fw-bold"><?php echo date('M d, Y', strtotime($displayPayroll['period_start'])); ?> - <?php echo date('M d, Y', strtotime($displayPayroll['period_end'])); ?></div>
-                            </div>
-                        </div>
-                        
-                        <div class="border rounded p-3 mb-4">
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>Total Hours Worked</span>
-                                <span class="fw-bold"><?php echo number_format($displayPayroll['total_hours'], 1); ?> hrs</span>
-                            </div>
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>Hourly Rate</span>
-                                <span>₱<?php echo number_format($displayPayroll['hourly_rate'], 2); ?></span>
-                            </div>
-                            <hr>
-                            <div class="d-flex justify-content-between mb-2">
-                                <span class="fw-bold">Gross Pay</span>
-                                <span class="fw-bold">₱<?php echo number_format($displayPayroll['gross_pay'], 2); ?></span>
-                            </div>
-                            <div class="d-flex justify-content-between text-danger">
-                                <span>Deductions (10%)</span>
-                                <span>-₱<?php echo number_format($displayPayroll['deductions'], 2); ?></span>
-                            </div>
-                            <hr class="my-2">
-                            <div class="d-flex justify-content-between">
-                                <span class="fw-bold fs-5">NET PAY</span>
-                                <span class="fw-bold fs-5 text-success amount">₱<?php echo number_format($displayPayroll['net_pay'], 2); ?></span>
-                            </div>
-                        </div>
-                        
-                        <div class="d-grid gap-2">
-                            <button onclick="window.print()" class="btn btn-primary btn-lg">
-                                <i class="fas fa-print me-2"></i> Print This Payslip
-                            </button>
-                            <a href="employee_dashboard.php" class="btn btn-outline-secondary">
-                                <i class="fas fa-arrow-left me-2"></i> Back to Dashboard
-                            </a>
-                        </div>
-                    </div>
-                    
-                    <div class="px-4 pb-4 text-center border-top pt-3">
-                        <small class="text-muted">
-                            Generated on <?php echo date('F d, Y', strtotime($displayPayroll['created_at'])); ?><br>
-                            This is a computer-generated document.
-                        </small>
-                    </div>
-                </div>
+
             </div>
         </div>
-        <?php endif; ?>
     </div>
-    
-    <style>
-        .sidebar { position: fixed; top: 0; left: 0; height: 100vh; width: 260px; background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; }
-        .main-content { margin-left: 260px; padding: 30px; }
-        .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
-        .sidebar .nav-link { color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; font-weight: 500; border-radius: 12px; margin: 4px 10px; }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { background-color: #f0f7ff; color: #0077B6; }
-        @media (max-width: 991.98px) { .main-content { margin-left: 0; } .sidebar { transform: translateX(-100%); } .sidebar.show { transform: translateX(0); } }
-    </style>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        const sidebar = document.getElementById('sidebar');
-        const mobileToggle = document.getElementById('mobileToggle');
-        if (mobileToggle) {
-            mobileToggle.addEventListener('click', () => sidebar.classList.toggle('show'));
-        }
-        
-        // Auto-print if ?print=1 parameter is present
-        <?php if (isset($_GET['print']) && $_GET['print'] == '1'): ?>
-        window.onload = function() {
-            window.print();
-        }
-        <?php endif; ?>
-    </script>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // ── SIDEBAR ──
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const toggle  = document.getElementById('mobileToggle');
+    function openSidebar()  { sidebar.classList.add('show'); overlay.classList.add('show'); }
+    function closeSidebar() { sidebar.classList.remove('show'); overlay.classList.remove('show'); }
+    if(toggle)  toggle.addEventListener('click', openSidebar);
+    if(overlay) overlay.addEventListener('click', closeSidebar);
+    sidebar.querySelectorAll('.nav-link').forEach(l => l.addEventListener('click', () => { if(window.innerWidth<992) closeSidebar(); }));
+
+    // ── AUTO PRINT ──
+    <?php if(isset($_GET['print']) && $_GET['print'] == '1'): ?>
+    window.addEventListener('load', () => window.print());
+    <?php endif; ?>
+</script>
 </body>
 </html>
