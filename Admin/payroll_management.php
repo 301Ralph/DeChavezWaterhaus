@@ -7,93 +7,74 @@ if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
+$adminID   = $_SESSION['userID'];
 $adminName = $_SESSION['userName'] ?? 'Admin';
-
-// Fetch admin data for profile picture
-$admin = $conn->query("SELECT * FROM customers WHERE userID = " . $_SESSION['userID'])->fetch_assoc();
+$admin     = $conn->query("SELECT * FROM customers WHERE userID = $adminID")->fetch_assoc();
 
 // Handle mark as paid
 if (isset($_GET['mark_paid'])) {
     $payrollID = intval($_GET['mark_paid']);
-    $conn->query("UPDATE payroll SET status = 'Paid', payment_date = CURDATE() WHERE payrollID = $payrollID");
-    echo '<script>window.location = "payroll_management.php";</script>';
-    exit();
+    $conn->query("UPDATE payroll SET status='Paid', payment_date=CURDATE() WHERE payrollID=$payrollID");
+    echo '<script>window.location="payroll_management.php";</script>'; exit();
 }
 
 // Handle payroll processing
 if (isset($_POST['process_payroll'])) {
-    $userID = intval($_POST['userID']);
+    $uid         = intval($_POST['userID']);
     $periodStart = $_POST['period_start'];
-    $periodEnd = $_POST['period_end'];
-    
-    // Calculate total hours for the period
-    $hoursQuery = $conn->prepare("
-        SELECT SUM(total_hours) as total_hours 
-        FROM attendance 
-        WHERE userID = ? AND DATE(clock_in) BETWEEN ? AND ?
-    ");
-    $hoursQuery->bind_param("iss", $userID, $periodStart, $periodEnd);
-    $hoursQuery->execute();
-    $hoursResult = $hoursQuery->get_result()->fetch_assoc();
-    $totalHours = $hoursResult['total_hours'] ?? 0;
-    $hoursQuery->close();
-    
-    // Get employee rate
-    $empQuery = $conn->prepare("SELECT hourly_rate, daily_rate FROM customers WHERE userID = ?");
-    $empQuery->bind_param("i", $userID);
-    $empQuery->execute();
-    $empData = $empQuery->get_result()->fetch_assoc();
-    $hourlyRate = $empData['hourly_rate'] ?? 100;
-    $dailyRate = $empData['daily_rate'] ?? 800;
-    $empQuery->close();
-    
-    // Calculate gross pay (use hourly rate)
-    $grossPay = $totalHours * $hourlyRate;
-    
-    // Basic deductions (10% for taxes/benefits)
+    $periodEnd   = $_POST['period_end'];
+
+    // Total hours from attendance
+    $hs = $conn->prepare("SELECT SUM(total_hours) as t FROM attendance WHERE userID=? AND DATE(clock_in) BETWEEN ? AND ?");
+    $hs->bind_param("iss", $uid, $periodStart, $periodEnd); $hs->execute();
+    $totalHours = $hs->get_result()->fetch_assoc()['t'] ?? 0; $hs->close();
+
+    // Employee rate
+    $es = $conn->prepare("SELECT hourly_rate, daily_rate FROM customers WHERE userID=?");
+    $es->bind_param("i", $uid); $es->execute();
+    $ed = $es->get_result()->fetch_assoc(); $es->close();
+    $hourlyRate = $ed['hourly_rate'] ?? 100;
+    $dailyRate  = $ed['daily_rate']  ?? 800;
+
+    $grossPay   = $totalHours * $hourlyRate;
     $deductions = $grossPay * 0.10;
-    $netPay = $grossPay - $deductions;
-    $status = 'Processed';
-    
-    // Check if payroll already exists for this period
-    $checkQuery = $conn->prepare("SELECT payrollID FROM payroll WHERE userID = ? AND period_start = ? AND period_end = ?");
-    $checkQuery->bind_param("iss", $userID, $periodStart, $periodEnd);
-    $checkQuery->execute();
-    $exists = $checkQuery->get_result()->num_rows > 0;
-    $checkQuery->close();
-    
+    $netPay     = $grossPay - $deductions;
+
+    // Check if payroll already exists
+    $ck = $conn->prepare("SELECT payrollID FROM payroll WHERE userID=? AND period_start=? AND period_end=?");
+    $ck->bind_param("iss", $uid, $periodStart, $periodEnd); $ck->execute();
+    $exists = $ck->get_result()->num_rows > 0; $ck->close();
+
     if ($exists) {
-        echo '<script>alert("Payroll already processed for this period!"); window.location = "payroll_management.php";</script>';
+        echo '<script>alert("Payroll already processed for this period!"); window.location="payroll_management.php";</script>';
     } else {
-        $insert = $conn->prepare("
-            INSERT INTO payroll (userID, period_start, period_end, total_hours, hourly_rate, daily_rate, gross_pay, deductions, net_pay, status) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Processed')
-        ");
-        $insert->bind_param("issdddddds", $userID, $periodStart, $periodEnd, $totalHours, $hourlyRate, $dailyRate, $grossPay, $deductions, $netPay, $status);
-        
-        if ($insert->execute()) {
-            echo '<script>alert("Payroll processed successfully! Net Pay: ₱' . number_format($netPay, 2) . '"); window.location = "payroll_management.php";</script>';
-        } else {
-            echo '<script>alert("Error processing payroll."); window.location = "payroll_management.php";</script>';
-        }
-        $insert->close();
+        $ins = $conn->prepare("INSERT INTO payroll (userID,period_start,period_end,total_hours,hourly_rate,daily_rate,gross_pay,deductions,net_pay,status) VALUES (?,?,?,?,?,?,?,?,?,'Processed')");
+        $ins->bind_param("issddddddd", $uid, $periodStart, $periodEnd, $totalHours, $hourlyRate, $dailyRate, $grossPay, $deductions, $netPay);
+        echo $ins->execute()
+            ? '<script>alert("Payroll processed! Net Pay: ₱'.number_format($netPay,2).'"); window.location="payroll_management.php";</script>'
+            : '<script>alert("Error processing payroll."); window.location="payroll_management.php";</script>';
+        $ins->close();
     }
     exit();
 }
 
-// Fetch all payroll records
+// Fetch payroll records
 $payrollRecords = $conn->query("
     SELECT p.*, c.Firstname, c.Lastname, c.profile_picture
     FROM payroll p
     JOIN customers c ON p.userID = c.userID
     ORDER BY p.created_at DESC
-    LIMIT 50
+    LIMIT 60
 ");
 
-// Fetch employees for payroll processing
-$employees = $conn->query("SELECT userID, Firstname, Lastname, hourly_rate, daily_rate FROM customers WHERE Role = 'employee' ORDER BY Firstname");
-?>
+$employees = $conn->query("SELECT userID, Firstname, Lastname, hourly_rate, daily_rate FROM customers WHERE Role='employee' ORDER BY Firstname");
 
+// Stats
+$statsQ  = $conn->query("SELECT COUNT(*) as total, SUM(net_pay) as total_paid, SUM(CASE WHEN status='Paid' THEN net_pay ELSE 0 END) as paid_sum, SUM(CASE WHEN status='Processed' THEN net_pay ELSE 0 END) as unpaid_sum FROM payroll");
+$stats   = $statsQ->fetch_assoc();
+
+$notifCount = $conn->query("SELECT COUNT(*) as u FROM notifications WHERE userID=$adminID AND is_read=0")->fetch_assoc()['u'] ?? 0;
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -102,309 +83,430 @@ $employees = $conn->query("SELECT userID, Firstname, Lastname, hourly_rate, dail
     <title>Payroll Management • Admin</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="icon" href="../images/logo.jpg" type="image/x-icon">
     <style>
-        :root { --primary: #0077B6; --primary-dark: #023E8A; }
-        body { font-family: 'Poppins', sans-serif; background-color: #f8f9fa; }
-        
-        .sidebar { 
-            position: fixed; top: 0; left: 0; height: 100vh; width: 260px; 
-            background: white; box-shadow: 2px 0 15px rgba(0,0,0,0.05); z-index: 1000; 
-            transition: all 0.3s ease; 
-            display: flex;
-            flex-direction: column;
+        :root {
+            --deep:  #020d18;  --abyss: #030f1e;  --ocean: #041e35;  --navy:  #0a2d4a;
+            --teal:  #0077b6;  --aqua:  #00b4d8;  --cyan:  #48cae4;
+            --foam:  #caf0f8;  --white: #f0f9ff;  --gold:  #f4c842;
+            --green: #4ade80;  --red: #f87171;     --violet: #a78bfa;
+            --glass: rgba(0,180,216,0.08);  --glass-border: rgba(72,202,228,0.18);
+            --sidebar-w: 260px;
         }
-        .sidebar .logo { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
-        .sidebar .logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; }
-        .sidebar .nav-link { 
-            color: #495057; padding: 14px 22px; display: flex; align-items: center; gap: 14px; 
-            font-weight: 500; transition: all 0.3s ease; border-radius: 12px; margin: 4px 10px;
-        }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { 
-            background-color: #f0f7ff; color: var(--primary); 
-        }
-        .sidebar .nav-link i { width: 22px; font-size: 1.1rem; }
-        
-        .main-content { margin-left: 260px; padding: 30px; transition: margin-left 0.3s ease; }
-        
-        .nav-menu { flex: 1; overflow-y: auto; padding-bottom: 20px; }
-        .logout-section { padding: 15px 10px; border-top: 1px solid #eee; background: white; }
-        
-        @media (max-width: 991.98px) {
-            .main-content { margin-left: 0; padding: 20px; }
-            .sidebar { transform: translateX(-100%); }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'DM Sans', sans-serif; background: var(--deep); color: var(--white); min-height: 100vh; }
+
+        /* ── SIDEBAR ── */
+        .sidebar { position: fixed; top: 0; left: 0; height: 100vh; width: var(--sidebar-w); background: var(--abyss); border-right: 1px solid var(--glass-border); z-index: 1000; display: flex; flex-direction: column; transition: transform 0.3s ease; }
+        .sidebar-logo { padding: 22px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--glass-border); flex-shrink: 0; }
+        .sidebar-logo img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(0,180,216,0.35); }
+        .sidebar-logo-text { font-family: 'Cormorant Garamond', serif; font-size: 1rem; font-weight: 500; color: var(--white); line-height: 1.2; }
+        .sidebar-logo-sub  { font-size: 0.65rem; color: rgba(202,240,248,0.3); letter-spacing: 0.1em; text-transform: uppercase; }
+        .sidebar-nav { flex: 1; overflow-y: auto; padding: 12px 10px; scrollbar-width: thin; scrollbar-color: rgba(72,202,228,0.15) transparent; }
+        .sidebar-nav::-webkit-scrollbar { width: 3px; }
+        .sidebar-nav::-webkit-scrollbar-thumb { background: rgba(72,202,228,0.15); border-radius: 2px; }
+        .nav-section-label { font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(202,240,248,0.22); padding: 14px 10px 5px; }
+        .nav-link { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px; color: rgba(202,240,248,0.48) !important; text-decoration: none; font-size: 0.84rem; font-weight: 500; transition: all 0.22s ease; margin-bottom: 1px; position: relative; }
+        .nav-link i { width: 16px; text-align: center; font-size: 0.85rem; color: rgba(0,180,216,0.38); transition: color 0.22s; }
+        .nav-link:hover { background: var(--glass); color: var(--foam) !important; }
+        .nav-link:hover i { color: var(--aqua); }
+        .nav-link.active { background: linear-gradient(135deg, rgba(0,119,182,0.25), rgba(0,180,216,0.12)); border: 1px solid rgba(0,180,216,0.2); color: var(--aqua) !important; }
+        .nav-link.active i { color: var(--aqua); }
+        .nav-link.active::before { content: ''; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px; background: var(--aqua); border-radius: 0 3px 3px 0; }
+        .nav-link.danger { color: rgba(252,165,165,0.6) !important; }
+        .nav-link.danger i { color: rgba(252,165,165,0.5); }
+        .nav-link.danger:hover { background: rgba(248,113,113,0.08); color: #fca5a5 !important; }
+        .sidebar-footer { padding: 12px 10px; border-top: 1px solid var(--glass-border); flex-shrink: 0; }
+
+        /* ── MAIN ── */
+        .main-content { margin-left: var(--sidebar-w); min-height: 100vh; padding: 26px 30px; }
+
+        /* ── TOP BAR ── */
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .topbar-left h4 { font-family: 'Cormorant Garamond', serif; font-size: 1.65rem; font-weight: 400; color: var(--white); line-height: 1.1; }
+        .topbar-left p { font-size: 0.8rem; color: rgba(202,240,248,0.4); margin-top: 2px; }
+        .topbar-right { display: flex; align-items: center; gap: 10px; }
+        .topbar-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--glass); border: 1px solid var(--glass-border); color: rgba(202,240,248,0.6); display: flex; align-items: center; justify-content: center; font-size: 0.88rem; text-decoration: none; transition: all 0.3s; position: relative; cursor: pointer; }
+        .topbar-btn:hover { background: rgba(0,180,216,0.15); border-color: var(--aqua); color: var(--aqua); }
+        .topbar-notif-badge { position: absolute; top: -3px; right: -3px; background: var(--gold); color: var(--deep); font-size: 0.55rem; font-weight: 700; min-width: 15px; height: 15px; border-radius: 50px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+        .avatar-btn { display: flex; align-items: center; gap: 9px; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 50px; padding: 5px 12px 5px 5px; cursor: pointer; transition: all 0.3s; }
+        .avatar-btn:hover { border-color: rgba(0,180,216,0.35); background: rgba(0,180,216,0.1); }
+        .avatar-circle { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+        .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-name { font-size: 0.8rem; font-weight: 500; color: var(--white); }
+        .avatar-role { font-size: 0.68rem; color: rgba(202,240,248,0.4); }
+        .dropdown-menu { background: var(--ocean) !important; border: 1px solid var(--glass-border) !important; border-radius: 13px !important; padding: 7px !important; box-shadow: 0 18px 48px rgba(0,0,0,0.5) !important; }
+        .dropdown-item { color: rgba(202,240,248,0.65) !important; border-radius: 7px !important; padding: 8px 13px !important; font-size: 0.83rem !important; transition: all 0.2s !important; }
+        .dropdown-item:hover { background: var(--glass) !important; color: var(--aqua) !important; }
+        .dropdown-item.text-danger { color: rgba(252,165,165,0.7) !important; }
+        .dropdown-item.text-danger:hover { background: rgba(248,113,113,0.08) !important; color: #fca5a5 !important; }
+        .dropdown-divider { border-color: var(--glass-border) !important; margin: 4px 0 !important; }
+
+        /* ── STAT CARDS ── */
+        .stat-card { background: linear-gradient(145deg,rgba(10,45,74,0.65),rgba(3,15,30,0.85)); border: 1px solid var(--glass-border); border-radius: 16px; padding: 20px 22px; display: flex; align-items: center; gap: 16px; transition: all 0.3s; }
+        .stat-card:hover { transform: translateY(-4px); border-color: rgba(0,180,216,0.25); box-shadow: 0 16px 40px rgba(0,0,0,0.3); }
+        .stat-icon { width: 48px; height: 48px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; flex-shrink: 0; }
+        .si-blue   { background: rgba(0,180,216,0.12); color: var(--aqua); }
+        .si-green  { background: rgba(74,222,128,0.1);  color: var(--green); }
+        .si-gold   { background: rgba(244,200,66,0.1);  color: var(--gold); }
+        .si-violet { background: rgba(167,139,250,0.1); color: var(--violet); }
+        .stat-num  { font-family: 'Cormorant Garamond', serif; font-size: 1.85rem; font-weight: 600; color: var(--white); line-height: 1; }
+        .stat-num-sm { font-family: 'Cormorant Garamond', serif; font-size: 1.35rem; font-weight: 600; color: var(--white); line-height: 1; }
+        .stat-lbl  { font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(202,240,248,0.35); margin-top: 3px; }
+
+        /* ── PROCESS FORM CARD ── */
+        .form-card { background: linear-gradient(145deg, rgba(10,45,74,0.55), rgba(3,15,30,0.78)); border: 1px solid var(--glass-border); border-radius: 17px; overflow: hidden; margin-bottom: 22px; }
+        .form-card-head { padding: 18px 22px; border-bottom: 1px solid var(--glass-border); display: flex; align-items: center; gap: 10px; }
+        .form-card-title { font-family: 'Cormorant Garamond', serif; font-size: 1.15rem; font-weight: 500; color: var(--white); }
+        .form-card-body  { padding: 22px; }
+
+        .field-label { display: block; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(202,240,248,0.45); margin-bottom: 7px; }
+        .field-input, .field-select { width: 100%; background: rgba(4,30,53,0.7); border: 1px solid var(--glass-border); color: var(--white); font-family: 'DM Sans', sans-serif; font-size: 0.9rem; padding: 11px 14px; border-radius: 11px; outline: none; transition: all 0.3s; }
+        .field-input:focus, .field-select:focus { border-color: var(--aqua); background: rgba(0,180,216,0.07); box-shadow: 0 0 0 3px rgba(0,180,216,0.08); }
+        .field-select option { background: var(--ocean); }
+        .field-hint { font-size: 0.72rem; color: rgba(202,240,248,0.28); margin-top: 5px; }
+
+        .btn-process { display: inline-flex; align-items: center; gap: 7px; padding: 12px 26px; background: linear-gradient(135deg, var(--teal), var(--aqua)); border: none; border-radius: 50px; color: var(--deep); font-family: 'DM Sans', sans-serif; font-size: 0.84rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: all 0.3s; box-shadow: 0 5px 16px rgba(0,180,216,0.25); width: 100%; justify-content: center; }
+        .btn-process:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,180,216,0.45); }
+
+        /* ── DATA CARD ── */
+        .data-card { background: linear-gradient(145deg,rgba(10,45,74,0.5),rgba(3,15,30,0.75)); border: 1px solid var(--glass-border); border-radius: 17px; overflow: hidden; }
+        .data-card-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 22px; border-bottom: 1px solid var(--glass-border); flex-wrap: wrap; gap: 10px; }
+        .data-card-title { font-family: 'Cormorant Garamond', serif; font-size: 1.18rem; font-weight: 500; color: var(--white); }
+        .data-card-sub   { font-size: 0.75rem; color: rgba(202,240,248,0.35); margin-top: 2px; }
+        .count-badge { background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); padding: 3px 10px; border-radius: 50px; font-size: 0.72rem; font-weight: 700; }
+
+        /* filter pills */
+        .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid rgba(72,202,228,0.06); }
+        .filter-pill { padding: 5px 13px; border-radius: 50px; border: 1px solid var(--glass-border); background: transparent; color: rgba(202,240,248,0.42); font-family: 'DM Sans', sans-serif; font-size: 0.76rem; font-weight: 500; cursor: pointer; transition: all 0.22s; }
+        .filter-pill:hover { color: var(--foam); border-color: rgba(0,180,216,0.28); }
+        .filter-pill.active { background: linear-gradient(135deg, var(--teal), var(--aqua)); border-color: transparent; color: var(--deep); font-weight: 700; box-shadow: 0 4px 14px rgba(0,180,216,0.22); }
+
+        /* ── TABLE ── */
+        .pay-table { width: 100%; border-collapse: collapse; }
+        .pay-table th { font-size: 0.66rem; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(202,240,248,0.3); padding: 0 16px 12px; text-align: left; border-bottom: 1px solid var(--glass-border); }
+        .pay-table td { padding: 14px 16px; font-size: 0.85rem; color: rgba(202,240,248,0.7); border-bottom: 1px solid rgba(72,202,228,0.06); vertical-align: middle; }
+        .pay-table tr:last-child td { border-bottom: none; }
+        .pay-table tr:hover td { background: rgba(0,180,216,0.03); color: var(--foam); }
+
+        .emp-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 1px solid var(--glass-border); flex-shrink: 0; }
+        .emp-initial { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), var(--aqua)); color: var(--deep); font-weight: 700; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .emp-name  { font-weight: 500; color: var(--white); font-size: 0.88rem; }
+
+        .period-badge { display: inline-flex; align-items: center; gap: 5px; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 50px; padding: 3px 10px; font-size: 0.73rem; color: rgba(202,240,248,0.5); }
+        .hours-val { font-family: 'Cormorant Garamond', serif; font-size: 1.05rem; font-weight: 600; color: var(--white); }
+        .rate-val  { font-size: 0.78rem; color: rgba(202,240,248,0.45); }
+        .gross-val { font-weight: 500; color: var(--foam); }
+        .deduct-val { color: var(--red); }
+        .net-val   { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-weight: 600; color: var(--green); }
+
+        /* status pills */
+        .s-Processed { background: rgba(0,180,216,0.1);   color: var(--aqua);  border: 1px solid rgba(0,180,216,0.25); padding: 4px 11px; border-radius: 50px; font-size: 0.71rem; font-weight: 700; }
+        .s-Paid      { background: rgba(74,222,128,0.1);  color: var(--green); border: 1px solid rgba(74,222,128,0.25); padding: 4px 11px; border-radius: 50px; font-size: 0.71rem; font-weight: 700; }
+
+        /* mark paid button */
+        .btn-mark-paid { display: inline-flex; align-items: center; gap: 5px; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.25); color: var(--green); padding: 6px 14px; border-radius: 50px; font-size: 0.76rem; font-weight: 700; cursor: pointer; transition: all 0.25s; }
+        .btn-mark-paid:hover { background: rgba(74,222,128,0.2); transform: translateY(-1px); }
+        .paid-date { font-size: 0.74rem; color: rgba(202,240,248,0.3); }
+
+        /* empty */
+        .empty-state { text-align: center; padding: 52px 20px; color: rgba(202,240,248,0.3); }
+        .empty-state i { font-size: 2.2rem; display: block; margin-bottom: 12px; color: rgba(0,180,216,0.15); }
+        .empty-state p { font-size: 0.85rem; }
+
+        /* no results */
+        #noResults { display: none; text-align: center; padding: 36px; color: rgba(202,240,248,0.3); font-size: 0.85rem; }
+
+        /* ── MOBILE ── */
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(2,13,24,0.7); z-index: 999; backdrop-filter: blur(3px); }
+        .mobile-toggle { background: var(--glass); border: 1px solid var(--glass-border); color: var(--aqua); width: 38px; height: 38px; border-radius: 9px; display: none; align-items: center; justify-content: center; cursor: pointer; font-size: 0.88rem; }
+
+        @media (max-width: 991px) {
+            .sidebar { transform: translateX(-100%); box-shadow: 4px 0 40px rgba(0,0,0,0.5); }
             .sidebar.show { transform: translateX(0); }
-        }
-        
-        .payroll-card {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-            transition: transform 0.2s ease;
-        }
-        
-        .payroll-card:hover {
-            transform: translateY(-3px);
-        }
-        
-        .amount {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #023E8A;
+            .sidebar-overlay.show { display: block; }
+            .main-content { margin-left: 0; padding: 18px 16px; }
+            .mobile-toggle { display: flex; }
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar -->
-    <div class="sidebar" id="sidebar">
-        <div class="logo p-4 d-flex align-items-center gap-3 border-bottom">
-            <img src="../images/logo.jpg" alt="Logo" style="width: 42px; height: 42px; border-radius: 50%; object-fit: cover;">
-            <div>
-                <span class="fw-bold fs-5">De Chavez Waterhaus</span>
-                <small class="d-block text-muted">Admin Panel</small>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+        <img src="../images/logo.jpg" alt="Logo">
+        <div>
+            <div class="sidebar-logo-text">De Chavez Waterhaus</div>
+            <div class="sidebar-logo-sub">Admin Panel</div>
+        </div>
+    </div>
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">Main</div>
+        <a href="admin_dashboard.php"   class="nav-link"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+        <a href="manage_products.php"   class="nav-link"><i class="fas fa-box"></i> Products</a>
+        <a href="manage_orders.php"     class="nav-link"><i class="fas fa-shopping-cart"></i> Orders</a>
+        <a href="manage_users.php"      class="nav-link"><i class="fas fa-users"></i> Users</a>
+        <a href="manage_employees.php"  class="nav-link"><i class="fas fa-user-tie"></i> Employees</a>
+        <div class="nav-section-label">Operations</div>
+        <a href="attendance_management.php" class="nav-link"><i class="fas fa-clock"></i> Attendance</a>
+        <a href="payroll_management.php"    class="nav-link active"><i class="fas fa-money-bill"></i> Payroll</a>
+        <a href="generate_payslip.php"      class="nav-link"><i class="fas fa-file-pdf"></i> Generate Payslip</a>
+        <a href="leave_management.php"      class="nav-link"><i class="fas fa-calendar-alt"></i> Manage Leave</a>
+        <div class="nav-section-label">Support & Reports</div>
+        <a href="support_tickets.php"   class="nav-link"><i class="fas fa-headset"></i> Support Tickets</a>
+        <a href="reports.php"           class="nav-link"><i class="fas fa-chart-bar"></i> Reports</a>
+        <div class="nav-section-label" style="margin-top:14px;"></div>
+        <a href="profile.php"           class="nav-link"><i class="fas fa-user"></i> My Profile</a>
+        <a href="../logout.php"         class="nav-link danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </nav>
+</aside>
+
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ── MAIN ── -->
+<main class="main-content">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="d-flex align-items-center gap-3">
+            <button class="mobile-toggle" id="mobileToggle"><i class="fas fa-bars"></i></button>
+            <div class="topbar-left">
+                <h4>Payroll Management</h4>
+                <p>Process and manage employee payroll records</p>
             </div>
         </div>
-        
-        <div class="nav-menu px-3 mt-2">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="admin_dashboard.php" class="nav-link"><i class="fas fa-tachometer-alt me-3"></i> <span>Dashboard</span></a></li>
-                <li class="nav-item"><a href="manage_products.php" class="nav-link"><i class="fas fa-box me-3"></i> <span>Manage Products</span></a></li>
-                <li class="nav-item"><a href="manage_orders.php" class="nav-link"><i class="fas fa-shopping-cart me-3"></i> <span>Manage Orders</span></a></li>
-                <li class="nav-item"><a href="manage_users.php" class="nav-link"><i class="fas fa-users me-3"></i> <span>Manage Users</span></a></li>
-                <li class="nav-item"><a href="manage_employees.php" class="nav-link"><i class="fas fa-users me-3"></i> <span>Manage Employees</span></a></li>
-                <li class="nav-item"><a href="attendance_management.php" class="nav-link"><i class="fas fa-clock me-3"></i> <span>Attendance</span></a></li>
-                <li class="nav-item"><a href="payroll_management.php" class="nav-link active"><i class="fas fa-money-bill me-3"></i> <span>Payroll</span></a></li>
-                <li class="nav-item"><a href="generate_payslip.php" class="nav-link"><i class="fas fa-file-pdf me-3"></i> <span>Generate Payslip</span></a></li>
-                <li class="nav-item"><a href="support_tickets.php" class="nav-link"><i class="fas fa-headset me-3"></i> <span>Support Tickets</span></a></li>
-                <li class="nav-item"><a href="reports.php" class="nav-link"><i class="fas fa-chart-bar me-3"></i> <span>Reports & Analytics</span></a></li>
-                <li class="nav-item"><a href="profile.php" class="nav-link"><i class="fas fa-user me-3"></i> <span>My Profile</span></a></li>
-            </ul>
-        </div>
-        
-        <div class="logout-section">
-            <ul class="nav flex-column">
-                <li class="nav-item"><a href="../logout.php" class="nav-link text-danger"><i class="fas fa-sign-out-alt me-3"></i> <span>Logout</span></a></li>
-            </ul>
+        <div class="topbar-right">
+            <a href="notifications.php" class="topbar-btn">
+                <i class="fas fa-bell"></i>
+                <?php if($notifCount>0): ?><span class="topbar-notif-badge"><?php echo min($notifCount,9).($notifCount>9?'+':'');?></span><?php endif; ?>
+            </a>
+            <div class="dropdown">
+                <div class="avatar-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <div class="avatar-circle">
+                        <?php if(!empty($admin['profile_picture'])&&file_exists('../'.$admin['profile_picture'])): ?>
+                            <img src="../<?php echo htmlspecialchars($admin['profile_picture']);?>" alt="">
+                        <?php else: ?>
+                            <?php echo strtoupper(substr($adminName,0,1));?>
+                        <?php endif; ?>
+                    </div>
+                    <div class="d-none d-md-block">
+                        <div class="avatar-name"><?php echo htmlspecialchars($adminName);?></div>
+                        <div class="avatar-role">Administrator</div>
+                    </div>
+                    <i class="fas fa-chevron-down fa-xs ms-1" style="color:rgba(202,240,248,0.3);"></i>
+                </div>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                </ul>
+            </div>
         </div>
     </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div class="d-flex align-items-center">
-                <button class="btn btn-light d-lg-none me-3 shadow-sm" id="mobileToggle" style="width: 42px; height: 42px; border-radius: 12px;">
-                    <i class="fas fa-bars"></i>
-                </button>
-                <div>
-                    <h4 class="fw-bold mb-0">Payroll Management</h4>
-                    <p class="text-muted mb-0">Process and manage employee payroll</p>
-                </div>
+    <!-- Stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon si-blue"><i class="fas fa-file-invoice-dollar"></i></div>
+                <div><div class="stat-num"><?php echo $stats['total'];?></div><div class="stat-lbl">Total Records</div></div>
             </div>
-            
-            <div class="d-flex align-items-center gap-3">
-                <!-- Notification Bell -->
-                <div class="dropdown">
-                    <button class="btn btn-light position-relative" data-bs-toggle="dropdown" style="width: 42px; height: 42px; border-radius: 12px;">
-                        <i class="fas fa-bell fa-lg"></i>
-                        <?php 
-                        $unreadCount = $conn->query("SELECT COUNT(*) as count FROM notifications WHERE userID = " . $_SESSION['userID'] . " AND is_read = 0")->fetch_assoc()['count'] ?? 0;
-                        if ($unreadCount > 0): 
-                        ?>
-                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 9px; padding: 2px 6px;">
-                                <?php echo min($unreadCount, 9); ?><?php echo $unreadCount > 9 ? '+' : ''; ?>
-                            </span>
-                        <?php endif; ?>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow" style="width: 320px; max-height: 400px; overflow-y: auto;">
-                        <li class="dropdown-header fw-bold">Notifications</li>
-                        <?php 
-                        $notifs = $conn->query("SELECT * FROM notifications WHERE userID = " . $_SESSION['userID'] . " ORDER BY created_at DESC LIMIT 5");
-                        if ($notifs->num_rows > 0):
-                            while ($n = $notifs->fetch_assoc()):
-                        ?>
-                            <li><a class="dropdown-item small" href="notifications.php"><?php echo htmlspecialchars($n['message']); ?></a></li>
-                        <?php endwhile; else: ?>
-                            <li><span class="dropdown-item text-muted small">No new notifications</span></li>
-                        <?php endif; ?>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-center small text-primary" href="notifications.php">View All</a></li>
-                    </ul>
-                </div>
-                
-                <div class="dropdown">
-                    <button class="btn btn-light d-flex align-items-center gap-2 px-3 py-2 rounded-pill shadow-sm" data-bs-toggle="dropdown">
-                        <?php if (!empty($admin['profile_picture']) && file_exists('../' . $admin['profile_picture'])): ?>
-                            <img src="../<?php echo $admin['profile_picture']; ?>" alt="Profile" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
-                        <?php else: ?>
-                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                                <span class="fw-bold fs-6"><?php echo strtoupper(substr($adminName, 0, 1)); ?></span>
-                            </div>
-                        <?php endif; ?>
-                        <div class="text-start d-none d-md-block">
-                            <div class="fw-semibold"><?php echo htmlspecialchars($adminName); ?></div>
-                            <small class="text-muted">Administrator</small>
-                        </div>
-                        <i class="fas fa-chevron-down fa-sm text-muted ms-1"></i>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow">
-                        <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user me-2"></i> My Profile</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
-                    </ul>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon si-green"><i class="fas fa-circle-check"></i></div>
+                <div>
+                    <div class="stat-num-sm" style="color:var(--green);">₱<?php echo number_format($stats['paid_sum']??0,0);?></div>
+                    <div class="stat-lbl">Total Paid Out</div>
                 </div>
             </div>
         </div>
-
-        <!-- Process Payroll Form -->
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white border-0 py-3">
-                <h6 class="fw-bold mb-0">Process New Payroll</h6>
+        <div class="stat-card col-6 col-md-3" style="border-radius:16px;padding:20px 22px;display:flex;align-items:center;gap:16px;">
+            <div class="stat-icon si-gold"><i class="fas fa-clock-rotate-left"></i></div>
+            <div>
+                <div class="stat-num-sm" style="color:var(--gold);">₱<?php echo number_format($stats['unpaid_sum']??0,0);?></div>
+                <div class="stat-lbl">Unpaid Balance</div>
             </div>
-            <div class="card-body p-4">
-                <form method="POST" class="row g-3 align-items-end">
-                    <div class="col-md-3">
-                        <label class="form-label fw-semibold">Employee</label>
-                        <select name="userID" class="form-select" required>
-                            <option value="">Select Employee...</option>
-                            <?php while ($emp = $employees->fetch_assoc()): ?>
-                                <option value="<?php echo $emp['userID']; ?>">
-                                    <?php echo htmlspecialchars($emp['Firstname'] . ' ' . $emp['Lastname']); ?> 
-                                    (₱<?php echo number_format($emp['hourly_rate'], 0); ?>/hr)
-                                </option>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon si-violet"><i class="fas fa-peso-sign"></i></div>
+                <div>
+                    <div class="stat-num-sm" style="color:var(--violet);">₱<?php echo number_format($stats['total_paid']??0,0);?></div>
+                    <div class="stat-lbl">All-Time Total</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Process Payroll Form -->
+    <div class="form-card">
+        <div class="form-card-head">
+            <i class="fas fa-calculator" style="color:var(--aqua);font-size:0.95rem;"></i>
+            <div class="form-card-title">Process New Payroll</div>
+        </div>
+        <div class="form-card-body">
+            <form method="POST">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="field-label">Employee</label>
+                        <select name="userID" class="field-select" required>
+                            <option value="">Select employee…</option>
+                            <?php while($emp = $employees->fetch_assoc()): ?>
+                            <option value="<?php echo $emp['userID'];?>">
+                                <?php echo htmlspecialchars($emp['Firstname'].' '.$emp['Lastname']);?> · ₱<?php echo number_format($emp['hourly_rate']??100,0);?>/hr
+                            </option>
                             <?php endwhile; ?>
                         </select>
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label fw-semibold">Period Start</label>
-                        <input type="date" name="period_start" class="form-control" value="<?php echo date('Y-m-01'); ?>" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label fw-semibold">Period End</label>
-                        <input type="date" name="period_end" class="form-control" value="<?php echo date('Y-m-t'); ?>" required>
+                    <div class="col-md-3">
+                        <label class="field-label">Period Start</label>
+                        <input type="date" name="period_start" class="field-input" value="<?php echo date('Y-m-01');?>" required>
                     </div>
                     <div class="col-md-3">
-                        <button type="submit" name="process_payroll" class="btn btn-primary px-5 w-100">
-                            <i class="fas fa-calculator me-2"></i> Process Payroll
-                        </button>
+                        <label class="field-label">Period End</label>
+                        <input type="date" name="period_end" class="field-input" value="<?php echo date('Y-m-t');?>" required>
                     </div>
                     <div class="col-md-2">
-                        <small class="text-muted d-block">Auto-calculates based on attendance records</small>
+                        <button type="submit" name="process_payroll" class="btn-process">
+                            <i class="fas fa-calculator"></i> Process
+                        </button>
                     </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- Payroll Records -->
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
-                <h6 class="fw-bold mb-0">Payroll History</h6>
-                <span class="badge bg-primary"><?php echo $payrollRecords->num_rows; ?> Records</span>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table align-middle mb-0">
-                        <thead class="bg-light">
-                            <tr>
-                                <th class="ps-4">Employee</th>
-                                <th>Period</th>
-                                <th>Hours</th>
-                                <th>Rate</th>
-                                <th>Gross Pay</th>
-                                <th>Deductions</th>
-                                <th>Net Pay</th>
-                                <th>Status</th>
-                                <th class="text-end pe-4">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if ($payrollRecords->num_rows > 0): ?>
-                                <?php while ($payroll = $payrollRecords->fetch_assoc()): ?>
-                                    <tr>
-                                        <td class="ps-4">
-                                            <div class="d-flex align-items-center">
-                                                <?php if (!empty($payroll['profile_picture']) && file_exists('../' . $payroll['profile_picture'])): ?>
-                                                    <img src="../<?php echo $payroll['profile_picture']; ?>" alt="" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover;" class="me-2">
-                                                <?php else: ?>
-                                                    <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-2" style="width: 36px; height: 36px;">
-                                                        <span class="fw-bold small"><?php echo strtoupper(substr($payroll['Firstname'], 0, 1)); ?></span>
-                                                    </div>
-                                                <?php endif; ?>
-                                                <span class="fw-semibold"><?php echo htmlspecialchars($payroll['Firstname'] . ' ' . $payroll['Lastname']); ?></span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="small">
-                                                <?php echo date('M j', strtotime($payroll['period_start'])); ?> - 
-                                                <?php echo date('M j, Y', strtotime($payroll['period_end'])); ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="fw-bold"><?php echo number_format($payroll['total_hours'], 1); ?> hrs</span>
-                                        </td>
-                                        <td>
-                                            <div class="small">₱<?php echo number_format($payroll['hourly_rate'], 0); ?>/hr</div>
-                                        </td>
-                                        <td>
-                                            <span class="fw-semibold">₱<?php echo number_format($payroll['gross_pay'], 2); ?></span>
-                                        </td>
-                                        <td>
-                                            <span class="text-danger">-₱<?php echo number_format($payroll['deductions'], 2); ?></span>
-                                        </td>
-                                        <td>
-                                            <span class="fw-bold text-success amount">₱<?php echo number_format($payroll['net_pay'], 2); ?></span>
-                                        </td>
-                                        <td>
-                                            <?php 
-                                            $statusClass = 'secondary';
-                                            if ($payroll['status'] == 'Processed') $statusClass = 'primary';
-                                            elseif ($payroll['status'] == 'Paid') $statusClass = 'success';
-                                            ?>
-                                            <span class="badge bg-<?php echo $statusClass; ?> px-3 py-2">
-                                                <?php echo $payroll['status']; ?>
-                                            </span>
-                                        </td>
-                                        <td class="text-end pe-4">
-                                            <?php if ($payroll['status'] == 'Processed'): ?>
-                                                <button class="btn btn-sm btn-success" onclick="markAsPaid(<?php echo $payroll['payrollID']; ?>)">
-                                                    <i class="fas fa-check me-1"></i> Mark Paid
-                                                </button>
-                                            <?php else: ?>
-                                                <span class="text-muted small">Paid on <?php echo date('M j', strtotime($payroll['payment_date'] ?? $payroll['updated_at'])); ?></span>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endwhile; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="9" class="text-center py-5 text-muted">
-                                        <i class="fas fa-money-bill fa-3x mb-3 opacity-50"></i>
-                                        <p>No payroll records yet.<br>Process your first payroll above!</p>
-                                    </td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
                 </div>
-            </div>
+                <div class="field-hint" style="margin-top:12px;">
+                    <i class="fas fa-info-circle me-1" style="color:var(--aqua);"></i>
+                    Auto-calculates gross pay from attendance records · 10% statutory deductions applied
+                </div>
+            </form>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Mobile Sidebar Toggle
-        const sidebar = document.getElementById('sidebar');
-        const mobileToggle = document.getElementById('mobileToggle');
-        
-        if (mobileToggle) {
-            mobileToggle.addEventListener('click', () => sidebar.classList.toggle('show'));
+    <!-- Payroll Records Table -->
+    <div class="data-card">
+        <div class="data-card-head">
+            <div>
+                <div class="data-card-title">Payroll History</div>
+                <div class="data-card-sub">Last 60 records</div>
+            </div>
+            <span class="count-badge"><?php echo $payrollRecords->num_rows;?> Records</span>
+        </div>
+
+        <!-- Filter Pills -->
+        <div class="filter-pills">
+            <button class="filter-pill active" onclick="filterPayroll('all',this)">All</button>
+            <button class="filter-pill" onclick="filterPayroll('Processed',this)">Processed (Unpaid)</button>
+            <button class="filter-pill" onclick="filterPayroll('Paid',this)">Paid</button>
+        </div>
+
+        <?php if($payrollRecords->num_rows > 0): ?>
+        <div style="overflow-x:auto;">
+            <table class="pay-table">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Period</th>
+                        <th>Hours</th>
+                        <th>Rate</th>
+                        <th>Gross</th>
+                        <th>Deductions</th>
+                        <th>Net Pay</th>
+                        <th>Status</th>
+                        <th style="text-align:right;padding-right:22px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="payrollBody">
+                    <?php $payrollRecords->data_seek(0); while($pr = $payrollRecords->fetch_assoc()): ?>
+                    <tr class="pay-row" data-status="<?php echo $pr['status'];?>">
+                        <td>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <?php if(!empty($pr['profile_picture'])&&file_exists('../'.$pr['profile_picture'])): ?>
+                                    <img src="../<?php echo htmlspecialchars($pr['profile_picture']);?>" class="emp-avatar" alt="">
+                                <?php else: ?>
+                                    <div class="emp-initial"><?php echo strtoupper(substr($pr['Firstname'],0,1));?></div>
+                                <?php endif; ?>
+                                <div class="emp-name"><?php echo htmlspecialchars($pr['Firstname'].' '.$pr['Lastname']);?></div>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="period-badge">
+                                <i class="fas fa-calendar-days" style="font-size:0.65rem;"></i>
+                                <?php echo date('M j', strtotime($pr['period_start']));?> – <?php echo date('M j, Y', strtotime($pr['period_end']));?>
+                            </span>
+                        </td>
+                        <td><span class="hours-val"><?php echo number_format($pr['total_hours'],1);?></span><span class="rate-val"> hrs</span></td>
+                        <td><span class="rate-val">₱<?php echo number_format($pr['hourly_rate'],0);?>/hr</span></td>
+                        <td><span class="gross-val">₱<?php echo number_format($pr['gross_pay'],2);?></span></td>
+                        <td><span class="deduct-val">−₱<?php echo number_format($pr['deductions'],2);?></span></td>
+                        <td><span class="net-val">₱<?php echo number_format($pr['net_pay'],2);?></span></td>
+                        <td><span class="s-<?php echo $pr['status'];?>"><?php echo $pr['status'];?></span></td>
+                        <td style="text-align:right;padding-right:18px;">
+                            <?php if($pr['status']==='Processed'): ?>
+                                <button class="btn-mark-paid" onclick="markPaid(<?php echo $pr['payrollID'];?>)">
+                                    <i class="fas fa-check"></i> Mark Paid
+                                </button>
+                            <?php else: ?>
+                                <span class="paid-date">
+                                    <i class="fas fa-check-circle me-1" style="color:var(--green);"></i>
+                                    <?php echo date('M j, Y', strtotime($pr['payment_date']??$pr['created_at']));?>
+                                </span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        </div>
+        <div id="noResults">No payroll records match this filter.</div>
+
+        <?php else: ?>
+        <div class="empty-state">
+            <i class="fas fa-money-bill"></i>
+            <p>No payroll records yet.<br>Process your first payroll using the form above.</p>
+        </div>
+        <?php endif; ?>
+    </div>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // ── SIDEBAR ──
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const toggle  = document.getElementById('mobileToggle');
+    function openSidebar()  { sidebar.classList.add('show'); overlay.classList.add('show'); }
+    function closeSidebar() { sidebar.classList.remove('show'); overlay.classList.remove('show'); }
+    if(toggle)  toggle.addEventListener('click', openSidebar);
+    if(overlay) overlay.addEventListener('click', closeSidebar);
+    sidebar.querySelectorAll('.nav-link').forEach(l => l.addEventListener('click', () => { if(window.innerWidth<992) closeSidebar(); }));
+
+    // ── MARK PAID ──
+    function markPaid(id) {
+        if(confirm('Mark this payroll record as Paid?')) {
+            window.location = 'payroll_management.php?mark_paid=' + id;
         }
-        
-        function markAsPaid(payrollID) {
-            if (confirm('Mark this payroll as paid?')) {
-                window.location = 'payroll_management.php?mark_paid=' + payrollID;
-            }
-        }
-    </script>
+    }
+
+    // ── FILTER ──
+    function filterPayroll(status, btn) {
+        document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const rows = document.querySelectorAll('.pay-row');
+        let vis = 0;
+
+        rows.forEach(row => {
+            const show = status === 'all' || row.dataset.status === status;
+            row.style.display = show ? '' : 'none';
+            if(show) vis++;
+        });
+
+        const nr = document.getElementById('noResults');
+        if(nr) nr.style.display = vis === 0 ? 'block' : 'none';
+    }
+</script>
 </body>
 </html>
